@@ -283,6 +283,173 @@ async def import_ofx(account_id:int, file:UploadFile=File(...)):
    r=apply_rules(c,p['payee']); p.update({'account_id':account_id,'category_id':r['category_id'] if r else None,'memo':(r['memo'] or p['memo']) if r else p['memo']});tx_create(c,p);added+=1
  return {'imported':added,'duplicates':dupes,'found':len(parsed)}
 
+def clean_money_ynab(v):
+    if not v: return 0.0
+    v = v.replace('$', '').replace(' ', '').replace(',', '.')
+    return round(float(v), 2)
+
+def ynab_month_to_iso(m):
+    m_map = {'Jan':'01','Feb':'02','Mar':'03','Apr':'04','May':'05','Jun':'06',
+             'Jul':'07','Aug':'08','Sep':'09','Oct':'10','Nov':'11','Dec':'12'}
+    p = m.strip().split()
+    if len(p) == 2 and p[0] in m_map:
+        return f'{p[1]}-{m_map[p[0]]}'
+    return m.strip()
+
+@app.post('/api/import/ynab')
+async def import_ynab(profile_id: int, plan_file: UploadFile = File(...), register_file: Optional[UploadFile] = File(None)):
+    plan_bytes = await plan_file.read()
+    try:
+        plan_text = plan_bytes.decode('utf-8-sig')
+    except Exception:
+        plan_text = plan_bytes.decode('cp1252', errors='replace')
+    
+    plan_reader = list(csv.DictReader(io.StringIO(plan_text)))
+    if not plan_reader or 'Category Group' not in plan_reader[0] or 'Category' not in plan_reader[0]:
+        raise HTTPException(400, "Le fichier Plan ne semble pas être un export CSV YNAB valide (colonnes requises: 'Category Group', 'Category').")
+    
+    reg_reader = []
+    if register_file:
+        reg_bytes = await register_file.read()
+        try:
+            reg_text = reg_bytes.decode('utf-8-sig')
+        except Exception:
+            reg_text = reg_bytes.decode('cp1252', errors='replace')
+        reg_reader = list(csv.DictReader(io.StringIO(reg_text)))
+
+    with db() as c:
+        existing_groups = {g['label']: g['id'] for g in rows(c, "SELECT id, COALESCE(label, name) label FROM groups WHERE profile_id=?", (profile_id,))}
+        existing_cats = {(cat['group_id'], cat['name']): cat['id'] for cat in rows(c, "SELECT c.id, c.group_id, c.name FROM categories c JOIN groups g ON g.id=c.group_id WHERE g.profile_id=?", (profile_id,))}
+        
+        max_pos = c.execute("SELECT COALESCE(MAX(position), 0) FROM groups WHERE profile_id=?", (profile_id,)).fetchone()[0]
+
+        groups_map = dict(existing_groups)
+        categories_map = dict(existing_cats)
+
+        for r in plan_reader:
+            g_name = (r.get('Category Group') or '').strip()
+            c_name = (r.get('Category') or '').strip()
+            if not g_name or not c_name:
+                continue
+
+            if g_name not in groups_map:
+                max_pos += 1
+                internal = f"{profile_id}:{g_name}:{uuid.uuid4().hex[:6]}"
+                c.execute("INSERT INTO groups(name, label, profile_id, position) VALUES(?,?,?,?)",
+                          (internal, g_name, profile_id, max_pos))
+                gid = c.execute("SELECT last_insert_rowid()").fetchone()[0]
+                groups_map[g_name] = gid
+            gid = groups_map[g_name]
+
+            if (gid, c_name) not in categories_map:
+                nature = 'Épargne' if ('Épargne' in g_name or 'Réserve' in g_name or 'Savings' in g_name) else 'Dépense'
+                c.execute("INSERT INTO categories(group_id, name, nature) VALUES(?,?,?)", (gid, c_name, nature))
+                cid = c.execute("SELECT last_insert_rowid()").fetchone()[0]
+                categories_map[(gid, c_name)] = cid
+
+        assigned_count = 0
+        for r in plan_reader:
+            g_name = (r.get('Category Group') or '').strip()
+            c_name = (r.get('Category') or '').strip()
+            if not g_name or not c_name:
+                continue
+            gid = groups_map[g_name]
+            cid = categories_map[(gid, c_name)]
+            iso_m = ynab_month_to_iso(r.get('Month', ''))
+            assigned = clean_money_ynab(r.get('Assigned', '0'))
+            if assigned != 0:
+                c.execute("INSERT INTO category_month(category_id, month, assigned) VALUES(?,?,?) ON CONFLICT(category_id, month) DO UPDATE SET assigned=excluded.assigned",
+                          (cid, iso_m, assigned))
+                assigned_count += 1
+
+        tx_added = 0
+        acc_created = 0
+
+        if reg_reader:
+            existing_accs = {a['name']: a['id'] for a in rows(c, "SELECT id, name FROM accounts WHERE profile_id=?", (profile_id,))}
+            
+            starting_balances = {}
+            for r in reg_reader:
+                if (r.get('Payee') or '').strip() == 'Starting Balance':
+                    acc = (r.get('Account') or '').strip()
+                    if acc:
+                        starting_balances[acc] = clean_money_ynab(r.get('Inflow')) - clean_money_ynab(r.get('Outflow'))
+
+            accounts_map = dict(existing_accs)
+            for r in reg_reader:
+                acc_name = (r.get('Account') or '').strip()
+                if not acc_name or acc_name in accounts_map:
+                    continue
+                kind = 'credit' if any(k in acc_name.lower() for k in ['visa', 'mastercard', 'rogers', 'credit', 'carte']) else ('savings' if any(k in acc_name.lower() for k in ['épargne', 'epargne', 'trouv', 'savings']) else 'checking')
+                op_bal = starting_balances.get(acc_name, 0.0)
+                c.execute("INSERT INTO accounts(name, kind, opening_balance, profile_id) VALUES(?,?,?,?)",
+                          (acc_name, kind, op_bal, profile_id))
+                aid = c.execute("SELECT last_insert_rowid()").fetchone()[0]
+                accounts_map[acc_name] = aid
+                acc_created += 1
+
+            transfers_list = []
+            for idx, r in enumerate(reg_reader):
+                if (r.get('Payee') or '').strip().startswith('Transfer : '):
+                    transfers_list.append((idx, r))
+
+            transfer_tokens = {}
+            for i, (idx1, t1) in enumerate(transfers_list):
+                if idx1 in transfer_tokens: continue
+                tgt = (t1.get('Payee') or '').strip()[11:].strip()
+                for j, (idx2, t2) in enumerate(transfers_list):
+                    if j == i or idx2 in transfer_tokens: continue
+                    if (t2.get('Account') or '').strip() == tgt and (t2.get('Payee') or '').strip() == 'Transfer : ' + (t1.get('Account') or '').strip():
+                        if t1.get('Date') == t2.get('Date') and t1.get('Outflow') == t2.get('Inflow') and t1.get('Inflow') == t2.get('Outflow'):
+                            tok = str(uuid.uuid4())
+                            transfer_tokens[idx1] = (tok, accounts_map.get(tgt))
+                            transfer_tokens[idx2] = (tok, accounts_map.get((t1.get('Account') or '').strip()))
+                            break
+
+            for idx, r in enumerate(reg_reader):
+                payee = (r.get('Payee') or '').strip()
+                if payee == 'Starting Balance':
+                    continue
+                acc_name = (r.get('Account') or '').strip()
+                if not acc_name or acc_name not in accounts_map:
+                    continue
+                aid = accounts_map[acc_name]
+                d = (r.get('Date') or '').strip().replace('/', '-')
+                outflow = clean_money_ynab(r.get('Outflow'))
+                inflow = clean_money_ynab(r.get('Inflow'))
+                amt = inflow - outflow
+                cleared = 1 if r.get('Cleared') in ('Cleared', 'Reconciled') else 0
+                memo = (r.get('Memo') or '').strip()
+                flag = (r.get('Flag') or '').strip()
+
+                g_name = (r.get('Category Group') or '').strip()
+                c_name = (r.get('Category') or '').strip()
+                cat_id = None
+                if g_name and c_name and not (g_name == 'Inflow' and c_name == 'Ready to Assign'):
+                    gid = groups_map.get(g_name)
+                    if gid:
+                        cat_id = categories_map.get((gid, c_name))
+
+                transfer_tok, transfer_acc_id = transfer_tokens.get(idx, (None, None))
+                
+                exists = c.execute("SELECT 1 FROM transactions WHERE account_id=? AND tx_date=? AND amount=? AND payee=? AND memo=?",
+                                   (aid, d, amt, payee, memo)).fetchone()
+                if exists:
+                    continue
+
+                c.execute("INSERT INTO transactions(account_id, tx_date, payee, memo, amount, category_id, splits, transfer_account_id, transfer_id, cleared, approved, flag) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                          (aid, d, payee, memo, amt, cat_id, '[]', transfer_acc_id, transfer_tok, cleared, 1, flag))
+                tx_added += 1
+
+    return {
+        'ok': True,
+        'groups_imported': len(groups_map),
+        'categories_imported': len(categories_map),
+        'assigned_months_imported': assigned_count,
+        'accounts_created': acc_created,
+        'transactions_imported': tx_added
+    }
+
 @app.post('/api/reconcile')
 def reconcile(p:dict):
  with db() as c:

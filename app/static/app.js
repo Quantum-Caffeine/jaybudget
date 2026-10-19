@@ -23,8 +23,85 @@ window.searchTx=async q=>{let tx=await api('transactions?q='+encodeURIComponent(
 window.patchTx=async(id,p)=>{await api('transactions/'+id,{method:'PATCH',body:JSON.stringify(p)});home();renderBudget()};window.deleteTx=async id=>{if(confirm('Supprimer cette transaction ?')){await api('transactions/'+id,{method:'DELETE'});renderTransactions();home();renderBudget()}}
 async function renderAccounts(){let accounts=await api('accounts?'+qs());$('#accounts').innerHTML=page('Comptes',`<button class="primary" onclick="openModal('accountModal')">＋ Compte</button>`,`<div class="card">${accounts.map(a=>`<div class="account"><div><b>${esc(a.name)}</b><br><span class="small">${({checking:'Chèques',savings:'Épargne',cash:'Espèces',credit:'Carte de crédit',loan:'Prêt'})[a.kind]||a.kind}</span></div><strong class="${a.balance<0?'bad':'good'}">${cash(a.balance)}</strong><button onclick="reconcile(${a.id},'${esc(a.name)}')">Rapprocher</button></div>`).join('')||'<div class="empty">Ajoutez votre premier compte.</div>'}</div><div class="card"><h2>Comptes et cartes</h2><p>Les cartes de crédit utilisent un solde négatif. Enregistrez le paiement comme un transfert depuis votre compte courant vers la carte.</p></div>`)}
 window.reconcile=async(id,name)=>{let statement_balance=prompt('Solde du relevé pour '+name);if(statement_balance===null)return;let d=await api('reconcile',{method:'POST',body:JSON.stringify({account_id:id,statement_balance,create_adjustment:false})});alert(`Solde compensé : ${cash(d.cleared_balance)}\nÉcart : ${cash(d.difference)}\nVous pouvez créer une transaction d’ajustement si nécessaire.`)}
-async function renderRules(){let rules=await api('rules?'+qs());$('#rules').innerHTML=page('Règles et import OFX','',`<div class="card"><h2>Importer un relevé OFX / QFX</h2><p>Les opérations déjà importées sont écartées grâce à l’identifiant bancaire (FITID), avec un contrôle de secours sur date, montant et bénéficiaire.</p><form id="importForm" class="formgrid"><label>Compte<select name="account_id">${state.accounts.map(a=>`<option value="${a.id}">${esc(a.name)}</option>`)}</select></label><label>Fichier OFX/QFX<input name="file" type="file" accept=".ofx,.qfx" required></label><footer><button class="primary">Importer</button></footer></form><p id="importResult"></p></div><div class="card"><h2>Règles de catégorisation</h2><form id="ruleForm" class="formgrid"><label>Expression / mot à reconnaître<input name="pattern" required placeholder="COSTCO|IGA"></label><label>Catégorie<select name="category_id"><option value="">Sans catégorie</option>${state.categories.map(c=>`<option value="${c.id}">${esc(c.group_name)} · ${esc(c.name)}</option>`)}</select></label><footer><button class="primary">Créer la règle</button></footer></form><table><thead><tr><th>Motif</th><th>Catégorie</th></tr></thead><tbody>${rules.map(r=>`<tr><td>${esc(r.pattern)}</td><td>${esc(r.category_name||'—')}</td></tr>`).join('')}</tbody></table></div>`);$('#importForm').onsubmit=importOfx;$('#ruleForm').onsubmit=saveRule}
-async function importOfx(e){e.preventDefault();let f=new FormData(e.target);let account=f.get('account_id');let r=await fetch('/api/import/ofx?account_id='+account,{method:'POST',body:f});let d=await r.json();$('#importResult').textContent=`${d.imported} opération(s) ajoutée(s), ${d.duplicates} doublon(s) ignoré(s) sur ${d.found}.`;home();renderBudget()};async function saveRule(e){e.preventDefault();let p=Object.fromEntries(new FormData(e.target));await api('rules',{method:'POST',body:JSON.stringify(p)});renderRules()}
+async function renderRules(){let rules=await api('rules?'+qs());$('#rules').innerHTML=page('Règles et imports','',`
+<div class="card">
+  <h2>📥 Importer un budget complet YNAB (CSV)</h2>
+  <p>Importe directement tes catégories, les budgets assignés mois par mois, tes comptes et l'ensemble de tes transactions depuis les exports YNAB.</p>
+  <form id="ynabImportForm" class="formgrid">
+    <label class="wide">Fichier Plan (ex: <i>... - Plan.csv</i>)<input name="plan_file" type="file" accept=".csv" required></label>
+    <label class="wide">Fichier Registre / Transactions (optionnel, ex: <i>... - Register.csv</i>)<input name="register_file" type="file" accept=".csv"></label>
+    <footer><button class="primary">Importer le Plan YNAB</button></footer>
+  </form>
+  <p id="ynabImportResult" style="font-weight:600;margin-top:10px"></p>
+</div>
+
+<div class="card">
+  <h2>Importer un relevé bancaire OFX / QFX</h2>
+  <p>Les opérations déjà importées sont écartées grâce à l'identifiant bancaire (FITID), avec un contrôle de secours sur date, montant et bénéficiaire.</p>
+  <form id="importForm" class="formgrid">
+    <label>Compte<select name="account_id">${state.accounts.map(a=>`<option value="${a.id}">${esc(a.name)}</option>`)}</select></label>
+    <label>Fichier OFX/QFX<input name="file" type="file" accept=".ofx,.qfx" required></label>
+    <footer><button class="primary">Importer</button></footer>
+  </form>
+  <p id="importResult"></p>
+</div>
+
+<div class="card">
+  <h2>Règles de catégorisation</h2>
+  <form id="ruleForm" class="formgrid">
+    <label>Expression / mot à reconnaître<input name="pattern" required placeholder="COSTCO|IGA"></label>
+    <label>Catégorie<select name="category_id"><option value="">Sans catégorie</option>${state.categories.map(c=>`<option value="${c.id}">${esc(c.group_name)} — ${esc(c.name)}</option>`)}</select></label>
+    <footer><button class="primary">Créer la règle</button></footer>
+  </form>
+  <table>
+    <thead><tr><th>Motif</th><th>Catégorie</th></tr></thead>
+    <tbody>${rules.map(r=>`<tr><td>${esc(r.pattern)}</td><td>${esc(r.category_name||'—')}</td></tr>`).join('')}</tbody>
+  </table>
+</div>`);
+$('#ynabImportForm').onsubmit=importYnab;
+$('#importForm').onsubmit=importOfx;
+$('#ruleForm').onsubmit=saveRule;
+}
+
+async function importYnab(e){
+  e.preventDefault();
+  let f=new FormData(e.target);
+  let resEl=$('#ynabImportResult');
+  resEl.textContent="Importation en cours...";
+  try{
+    let r=await fetch('/api/import/ynab?profile_id='+state.profile,{method:'POST',body:f});
+    if(!r.ok){
+      let err=await r.text();
+      resEl.textContent="Erreur lors de l'import: "+err;
+      return;
+    }
+    let d=await r.json();
+    resEl.textContent=`Succès ! ${d.groups_imported} groupes, ${d.categories_imported} catégories, ${d.assigned_months_imported} assignations mensuelles, ${d.accounts_created} comptes créés et ${d.transactions_imported} transactions importées.`;
+    await seed();
+    await home();
+    await renderBudget();
+  }catch(err){
+    resEl.textContent="Erreur réseau ou fichier: "+err.message;
+  }
+}
+
+async function importOfx(e){
+  e.preventDefault();
+  let f=new FormData(e.target);
+  let account=f.get('account_id');
+  let r=await fetch('/api/import/ofx?account_id='+account,{method:'POST',body:f});
+  let d=await r.json();
+  $('#importResult').textContent=`${d.imported} opération(s) ajoutée(s), ${d.duplicates} doublon(s) ignorée(s) sur ${d.found}.`;
+  home();
+  renderBudget();
+}
+
+async function saveRule(e){
+  e.preventDefault();
+  let p=Object.fromEntries(new FormData(e.target));
+  await api('rules',{method:'POST',body:JSON.stringify(p)});
+  renderRules();
+}
 async function renderReports(){let r=await api('report?months=12&'+qs()), max=Math.max(1,...Object.values(r.expenses));let chart=Object.entries(r.expenses).sort((a,b)=>b[1]-a[1]).map(([n,v])=>`<div class="chart-row"><span>${esc(n)}</span><div class="bar"><i style="width:${v/max*100}%"></i></div><b class="number">${cash(v)}</b></div>`).join('');let trend=Object.entries(r.trend).map(([m,v])=>`<tr><td>${m}</td><td class="number good">${cash(v.income)}</td><td class="number bad">${cash(v.expenses)}</td><td class="number">${cash(v.income-v.expenses)}</td></tr>`).join('');$('#reports').innerHTML=page('Rapports','',`<div class="metrics"><div class="metric"><span>Patrimoine actuel</span><strong>${cash(r.net_worth)}</strong></div><div class="metric"><span>Moyenne mensuelle des dépenses</span><strong class="bad">${cash(r.average_expense)}</strong></div><div class="metric"><span>Sources de revenus</span><strong>${Object.keys(r.income).length}</strong></div><div class="metric"><span>Catégories dépensées</span><strong>${Object.keys(r.expenses).length}</strong></div></div><div class="card"><h2>Dépenses par catégorie — 12 mois</h2>${chart||'<p class="empty">Pas encore de dépenses catégorisées.</p>'}</div><div class="card"><h2>Flux mensuel</h2><table><thead><tr><th>Mois</th><th class="number">Revenus</th><th class="number">Dépenses</th><th class="number">Écart</th></tr></thead><tbody>${trend}</tbody></table></div>`)}
 async function renderSettings(){$('#settings').innerHTML=page('Données et sauvegardes','',`<div class="card"><h2>Sauvegarde</h2><p>Télécharge une copie SQLite complète de ton budget. Conserve-la dans un emplacement sûr et chiffré.</p><a href="/api/backup"><button class="primary">Télécharger la sauvegarde</button></a></div><div class="card"><h2>Restaurer une sauvegarde</h2><p class="bad">La restauration remplace le budget actuel. Rafraîchis la page après confirmation.</p><form id="restoreForm"><input type="file" name="file" accept=".db" required> <button>Restaurer</button></form></div><div class="card"><h2>Application installable</h2><p>Budget Libre peut être installé depuis le menu du navigateur sur téléphone ou ordinateur. Les données restent sur ton serveur.</p></div>`);$('#restoreForm').onsubmit=async e=>{e.preventDefault();if(!confirm('Remplacer le budget actuel ?'))return;let r=await fetch('/api/restore',{method:'POST',body:new FormData(e.target)});if(r.ok)location.reload();else alert(await r.text())}}
 const renders={budget:renderBudget,transactions:renderTransactions,accounts:renderAccounts,rules:renderRules,reports:renderReports,settings:renderSettings};
