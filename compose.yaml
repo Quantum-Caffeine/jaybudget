@@ -1,0 +1,12 @@
+services:
+  budget-libre:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/data
+    environment:
+      # Décommentez et définissez un NIP pour activer l'authentification :
+      # - BUDGET_PIN=1234
+      - BUDGET_DATA_DIR=/data
+    restart: unless-stopped
