@@ -200,6 +200,62 @@ def add_group(p:dict):
 @app.get('/api/categories')
 def categories(profile_id:int=1):
  with db() as c: return rows(c,'SELECT c.*,COALESCE(g.label,g.name) group_name FROM categories c JOIN groups g ON g.id=c.group_id WHERE g.profile_id=? ORDER BY g.position,c.name',(profile_id,))
+@app.patch('/api/categories/{cid}')
+def patch_category(cid:int, p:dict):
+ with db() as c:
+  allowed = {'name', 'group_id', 'nature', 'saving_type', 'hidden'}
+  vals = {k: p[k] for k in p if k in allowed}
+  if not vals: return {'ok': True}
+  c.execute('UPDATE categories SET ' + ','.join(k+'=?' for k in vals) + ' WHERE id=?', (*vals.values(), cid))
+ return {'ok': True}
+
+@app.delete('/api/categories/{cid}')
+def delete_category(cid:int):
+ with db() as c:
+  tx_count = c.execute('SELECT COUNT(*) FROM transactions WHERE category_id=?', (cid,)).fetchone()[0]
+  if tx_count > 0:
+   raise HTTPException(400, f'Impossible de supprimer : {tx_count} transaction(s) sont encore associées à cette catégorie.')
+  c.execute('DELETE FROM category_month WHERE category_id=?', (cid,))
+  c.execute('DELETE FROM targets WHERE category_id=?', (cid,))
+  c.execute('DELETE FROM categories WHERE id=?', (cid,))
+ return {'ok': True}
+
+@app.patch('/api/groups/{gid}')
+def patch_group(gid:int, p:dict):
+ with db() as c:
+  allowed = {'label', 'position'}
+  vals = {k: p[k] for k in p if k in allowed}
+  if 'name' in p and 'label' not in vals: vals['label'] = p['name']
+  if not vals: return {'ok': True}
+  c.execute('UPDATE groups SET ' + ','.join(k+'=?' for k in vals) + ' WHERE id=?', (*vals.values(), gid))
+ return {'ok': True}
+
+@app.delete('/api/groups/{gid}')
+def delete_group(gid:int):
+ with db() as c:
+  cat_count = c.execute('SELECT COUNT(*) FROM categories WHERE group_id=?', (gid,)).fetchone()[0]
+  if cat_count > 0:
+   raise HTTPException(400, f'Impossible de supprimer : ce groupe contient encore {cat_count} catégorie(s).')
+  c.execute('DELETE FROM groups WHERE id=?', (gid,))
+ return {'ok': True}
+
+@app.post('/api/move-money')
+def move_money(p:dict):
+ from_cat = p.get('from_category_id')
+ to_cat = p.get('to_category_id')
+ month = p.get('month')
+ amount = money(p.get('amount', 0))
+ if amount <= 0 or not from_cat or not to_cat or from_cat == to_cat or not month:
+  raise HTTPException(400, 'Paramètres de déplacement invalides')
+ with db() as c:
+  cur_from = c.execute('SELECT COALESCE(assigned,0) FROM category_month WHERE category_id=? AND month=?', (from_cat, month)).fetchone()
+  cur_to = c.execute('SELECT COALESCE(assigned,0) FROM category_month WHERE category_id=? AND month=?', (to_cat, month)).fetchone()
+  from_val = (cur_from[0] if cur_from else 0.0) - amount
+  to_val = (cur_to[0] if cur_to else 0.0) + amount
+  c.execute('INSERT INTO category_month(category_id,month,assigned) VALUES(?,?,?) ON CONFLICT(category_id,month) DO UPDATE SET assigned=excluded.assigned', (from_cat, month, money(from_val)))
+  c.execute('INSERT INTO category_month(category_id,month,assigned) VALUES(?,?,?) ON CONFLICT(category_id,month) DO UPDATE SET assigned=excluded.assigned', (to_cat, month, money(to_val)))
+ return {'ok': True, 'from_assigned': money(from_val), 'to_assigned': money(to_val)}
+
 @app.post('/api/categories')
 def add_category(p:dict):
  with db() as c: return {'id':c.execute('INSERT INTO categories(group_id,name,nature,saving_type) VALUES(?,?,?,?)',(p['group_id'],p['name'],p.get('nature','Dépense'),p.get('saving_type',''))).lastrowid}
@@ -211,10 +267,11 @@ def add_account(p:dict):
  with db() as c:return {'id':c.execute('INSERT INTO accounts(name,kind,opening_balance,profile_id) VALUES(?,?,?,?)',(p['name'],p.get('kind','checking'),money(p.get('opening_balance')),p.get('profile_id',1))).lastrowid}
 
 @app.get('/api/transactions')
-def transactions(account_id:Optional[int]=None, q:str='', month:str='', profile_id:int=1):
+def transactions(account_id:Optional[int]=None, category_id:Optional[int]=None, q:str='', month:str='', profile_id:int=1):
  with db() as c:
   sql='''SELECT t.*,a.name account_name,c.name category_name FROM transactions t JOIN accounts a ON a.id=t.account_id LEFT JOIN categories c ON c.id=t.category_id WHERE a.profile_id=?'''; args=[profile_id]
   if account_id: sql+=' AND t.account_id=?';args.append(account_id)
+  if category_id: sql+=' AND (t.category_id=? OR (t.splits!=\'[]\' AND EXISTS(SELECT 1 FROM json_each(t.splits) WHERE CAST(json_extract(value,\'$.category_id\') AS INTEGER)=?)))';args.extend([category_id, category_id])
   if month: sql+=' AND substr(t.tx_date,1,7)=?';args.append(month)
   if q: sql+=' AND (t.payee LIKE ? OR t.memo LIKE ? OR c.name LIKE ?)';args += ['%'+q+'%']*3
   return rows(c,sql+' ORDER BY t.tx_date DESC,t.id DESC LIMIT 500',args)

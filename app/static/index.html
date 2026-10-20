@@ -6,4 +6,70 @@
 <dialog id="categoryModal"><form method="dialog" id="categoryForm"><div class="modalhead"><h2>Nouvelle catégorie</h2><button type="button" data-close="categoryModal" aria-label="Fermer">×</button></div><div class="formgrid"><label>Groupe<select name="group_id" id="catGroup"></select></label><label>Nom<input name="name" required></label><label>Nature<select name="nature"><option>Dépense</option><option>Épargne</option><option>Dette</option><option>Revenu</option></select></label><label>Type d’épargne<input name="saving_type" placeholder="Urgence, vacances…"></label></div><footer><button class="primary">Créer</button></footer></form></dialog>
 <dialog id="accountModal"><form method="dialog" id="accountForm"><div class="modalhead"><h2>Nouveau compte</h2><button type="button" data-close="accountModal" aria-label="Fermer">×</button></div><div class="formgrid"><label>Nom du compte<input name="name" required placeholder="Ex. Compte courant"></label><label>Type<select name="kind"><option value="checking">Chèques / courant</option><option value="savings">Épargne</option><option value="cash">Espèces</option><option value="credit">Carte de crédit</option><option value="loan">Prêt</option></select></label><label>Solde d’ouverture<input name="opening_balance" type="number" step="0.01" value="0" required></label></div><footer><button class="primary">Créer le compte</button></footer></form></dialog>
 <dialog id="targetModal"><form method="dialog" id="targetForm"><div class="modalhead"><h2>Configurer une cible</h2><button type="button" data-close="targetModal" aria-label="Fermer">×</button></div><input type="hidden" name="category_id" id="targetCategoryId"><div class="formgrid"><label>Type de cible<select name="kind"><option value="refill">Renflouer une enveloppe</option><option value="set_aside">Mettre de côté</option><option value="project">Économie de projet</option></select></label><label>Montant cible<input name="amount" type="number" min="0" step="0.01" required></label><label>Rythme<select name="frequency"><option value="weekly">Chaque semaine</option><option value="biweekly">Aux deux semaines</option><option value="monthly" selected>Chaque mois</option><option value="yearly">Chaque année</option></select></label><label>Jour requis (1 à 31)<input name="due_day" type="number" min="1" max="31" placeholder="Ex. 20"></label><label>Jour de semaine<select name="due_weekday"><option value="">Sans objet</option><option value="0">Lundi</option><option value="1">Mardi</option><option value="2">Mercredi</option><option value="3">Jeudi</option><option value="4">Vendredi</option><option value="5">Samedi</option><option value="6">Dimanche</option></select></label><label>Date finale / échéance<input name="due_date" type="date"></label><label class="wide">Note<input name="note" placeholder="Ex. facture de loyer"></label></div><p class="hint">Renflouer garde le solde restant pour la période suivante. Mettre de côté calcule le montant restant jusqu’à l’échéance. Une cible de projet crée automatiquement une « Banque de projet ».</p><footer><button class="primary">Enregistrer la cible</button></footer></form></dialog>
+
+<!-- Modal d'édition de catégorie -->
+<dialog id="editCategoryModal">
+  <form method="dialog" id="editCategoryForm">
+    <div class="modalhead">
+      <h2>Modifier la catégorie</h2>
+      <button type="button" data-close="editCategoryModal" aria-label="Fermer">✕</button>
+    </div>
+    <input type="hidden" name="id" id="editCatId">
+    <div class="formgrid">
+      <label>Nom<input name="name" id="editCatName" required></label>
+      <label>Groupe<select name="group_id" id="editCatGroup"></select></label>
+      <label>Nature<select name="nature" id="editCatNature"><option>Dépense</option><option>Épargne</option><option>Dette</option><option>Revenu</option></select></label>
+      <label>Type d'épargne<input name="saving_type" id="editCatSavingType" placeholder="Urgence, vacances..."></label>
+    </div>
+    <footer>
+      <button type="button" class="danger" id="btnDeleteCat" style="float:left">Supprimer la catégorie</button>
+      <button class="primary">Enregistrer</button>
+    </footer>
+  </form>
+</dialog>
+
+<!-- Modal Déplacer de l'argent (Move Money) -->
+<dialog id="moveMoneyModal">
+  <form method="dialog" id="moveMoneyForm">
+    <div class="modalhead">
+      <h2>Déplacer de l'argent</h2>
+      <button type="button" data-close="moveMoneyModal" aria-label="Fermer">✕</button>
+    </div>
+    <input type="hidden" name="from_category_id" id="moveFromCatId">
+    <div class="formgrid">
+      <label class="wide">Depuis la catégorie<input type="text" id="moveFromCatName" readonly style="background:#f0f5f5;font-weight:600"></label>
+      <label>Montant à déplacer<input name="amount" id="moveAmount" type="number" step="0.01" min="0.01" required placeholder="50.00"></label>
+      <label>Vers la catégorie<select name="to_category_id" id="moveToCatId" required></select></label>
+    </div>
+    <footer>
+      <button class="primary">Transférer l'argent</button>
+    </footer>
+  </form>
+</dialog>
+
+<!-- Modal Activité détaillée du mois -->
+<dialog id="activityModal" style="width:min(720px, calc(100% - 24px))">
+  <div class="modalhead">
+    <h2 id="activityModalTitle">Activité du mois</h2>
+    <button type="button" data-close="activityModal" aria-label="Fermer">✕</button>
+  </div>
+  <p id="activityModalSubtitle" class="subtext"></p>
+  <div style="max-height:400px;overflow-y:auto;margin:15px 0">
+    <table>
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Compte</th>
+          <th>Bénéficiaire</th>
+          <th>Mémo</th>
+          <th class="number">Montant</th>
+        </tr>
+      </thead>
+      <tbody id="activityModalRows"></tbody>
+    </table>
+  </div>
+  <footer>
+    <button type="button" data-close="activityModal">Fermer</button>
+  </footer>
+</dialog>
 <script src="/app.js"></script></body></html>
