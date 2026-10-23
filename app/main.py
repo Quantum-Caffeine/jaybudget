@@ -149,7 +149,23 @@ def tx_create(c,p):
 def dashboard(month: str=month_now(), profile_id:int=1):
  with db() as c:
   balance=c.execute('SELECT COALESCE(SUM(opening_balance),0)+COALESCE((SELECT SUM(amount) FROM transactions WHERE account_id IN (SELECT id FROM accounts WHERE profile_id=?)),0) FROM accounts WHERE closed=0 AND profile_id=?',(profile_id,profile_id)).fetchone()[0]
-  ready=c.execute('SELECT COALESCE(SUM(amount),0) FROM transactions WHERE account_id IN (SELECT id FROM accounts WHERE profile_id=?) AND category_id IS NULL AND transfer_account_id IS NULL',(profile_id,)).fetchone()[0]-c.execute('SELECT COALESCE(SUM(cm.assigned),0) FROM category_month cm JOIN categories ca ON ca.id=cm.category_id JOIN groups g ON g.id=ca.group_id WHERE cm.month=? AND g.profile_id=?',(month,profile_id)).fetchone()[0]
+  
+  # Soldes initiaux positifs (comptes de liquidités / chèques / épargne)
+  cash_opening=c.execute("SELECT COALESCE(SUM(opening_balance),0) FROM accounts WHERE closed=0 AND profile_id=? AND kind IN ('checking','savings','cash') AND opening_balance>0",(profile_id,)).fetchone()[0]
+  
+  # Tous les revenus (entrées d'argent à répartir) perçus jusqu'à ce mois inclusivement
+  inflows_up_to_month=c.execute('''SELECT COALESCE(SUM(amount),0) FROM transactions 
+    WHERE account_id IN (SELECT id FROM accounts WHERE profile_id=?) 
+      AND category_id IS NULL AND transfer_account_id IS NULL 
+      AND substr(tx_date,1,7)<=?''',(profile_id, month)).fetchone()[0]
+      
+  # Tous les montants assignés aux catégories jusqu'à ce mois inclusivement
+  assigned_up_to_month=c.execute('''SELECT COALESCE(SUM(cm.assigned),0) FROM category_month cm 
+    JOIN categories ca ON ca.id=cm.category_id 
+    JOIN groups g ON g.id=ca.group_id 
+    WHERE cm.month<=? AND g.profile_id=?''',(month, profile_id)).fetchone()[0]
+    
+  ready=cash_opening + inflows_up_to_month - assigned_up_to_month
   return {'month':month,'net_worth':money(balance),'ready':money(ready),'accounts':rows(c,"SELECT a.*, round(a.opening_balance+COALESCE((SELECT SUM(amount) FROM transactions t WHERE t.account_id=a.id),0),2) balance FROM accounts a WHERE closed=0 AND profile_id=? ORDER BY name",(profile_id,))}
 
 def target_recommendation(target, available, today):
