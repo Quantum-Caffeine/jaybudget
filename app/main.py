@@ -291,6 +291,17 @@ def transactions(account_id:Optional[int]=None, category_id:Optional[int]=None, 
   if month: sql+=' AND substr(t.tx_date,1,7)=?';args.append(month)
   if q: sql+=' AND (t.payee LIKE ? OR t.memo LIKE ? OR c.name LIKE ?)';args += ['%'+q+'%']*3
   return rows(c,sql+' ORDER BY t.tx_date DESC,t.id DESC LIMIT 500',args)
+@app.post('/api/transactions/approve-all')
+def approve_all(month:Optional[str]=None, profile_id:int=1):
+ with db() as c:
+  sql = 'UPDATE transactions SET approved=1 WHERE approved=0 AND account_id IN (SELECT id FROM accounts WHERE profile_id=?)'
+  args = [profile_id]
+  if month:
+   sql += ' AND substr(tx_date, 1, 7)=?'
+   args.append(month)
+  cur = c.execute(sql, args)
+  return {'approved_count': cur.rowcount}
+
 @app.post('/api/transactions')
 def add_transaction(p:dict):
  with db() as c:

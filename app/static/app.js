@@ -234,10 +234,28 @@ window.showActivity=async function(catId, catName){
 async function renderTransactions(){
   let tx=await api('transactions?month='+state.month+'&'+qs());
   
+  let unapprovedCount = tx.filter(t=>!t.approved).length;
+  let banner = '';
+  if(unapprovedCount > 0){
+    banner = `<div style="background:#fef3f2;border:1px solid #fecdca;color:#b42318;padding:10px 14px;border-radius:8px;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;">
+      <span>⚠️ <b>${unapprovedCount} transaction(s)</b> en attente d'approbation pour ce mois.</span>
+      <button class="primary" style="background:#b42318;border-color:#b42318;padding:6px 12px;font-size:13px;" onclick="approveAll()">✅ Tout approuver</button>
+    </div>`;
+  }
+  
   let rows=tx.map(t=>{
     let catSelect='';
+    let splits = [];
+    try { splits = JSON.parse(t.splits || '[]'); } catch(e){}
+    
     if(t.transfer_account_id){
       catSelect=`<span class="tag">Transfert</span>`;
+    }else if(splits && splits.length > 0){
+      let splitDetails = splits.map(s => {
+        let cat = state.categories.find(c => c.id === s.category_id);
+        return `${cat ? cat.name : 'Catégorie inconnue'}: ${cash(s.amount)}`;
+      }).join('&#10;');
+      catSelect=`<span class="tag clickable" style="background:#e0f2fe;color:#0369a1;" title="${splitDetails}">✂️ Ventilée (${splits.length})</span>`;
     }else{
       catSelect=`<select class="cat-select-inline" onchange="patchTx(${t.id},{category_id:this.value?+this.value:null})">
         <option value="">Entrée à répartir</option>
@@ -267,6 +285,7 @@ async function renderTransactions(){
     <input id="searchTx" placeholder="Rechercher..." oninput="searchTx(this.value)">
     <button class="primary" onclick="openModal('txModal')">➕ Transaction</button>
   `, `
+    ${banner}
     <div class="card">
       <table>
         <thead><tr><th>Date</th><th>Compte</th><th>Bénéficiaire</th><th>Catégorie</th><th class="number">Montant</th><th>État</th><th></th></tr></thead>
@@ -275,6 +294,16 @@ async function renderTransactions(){
     </div>
   `);
 }
+
+window.approveAll = async function(){
+  try {
+    let res = await api(`transactions/approve-all?month=${state.month}&${qs()}`, {method: 'POST'});
+    await renderTransactions();
+    home();
+  } catch(err){
+    alert('Erreur: ' + err.message);
+  }
+};
 
 window.shiftTxMonth=function(offset){
   let [y,m]=state.month.split('-').map(Number);
@@ -498,15 +527,98 @@ $$('aside [data-page]').forEach(b=>b.onclick=async()=>{
 
 $$('[data-close]').forEach(b=>b.onclick=()=>$('#'+b.dataset.close).close());
 
+// -------------------------------------------------------------
+// GESTION DES TRANSACTIONS VENTILÉES (SPLIT)
+// -------------------------------------------------------------
+let isSplitMode = false;
+
+window.toggleSplitMode = function(enable){
+  isSplitMode = enable;
+  if(enable){
+    $('#singleCatContainer').style.display = 'none';
+    $('#txTransferLabel').style.display = 'none';
+    $('#splitSection').style.display = 'block';
+    if($('#splitRows').children.length === 0){
+      addSplitRow();
+      addSplitRow();
+    }
+    updateSplitCalculation();
+  }else{
+    $('#singleCatContainer').style.display = 'grid';
+    $('#txTransferLabel').style.display = 'grid';
+    $('#splitSection').style.display = 'none';
+    $('#splitRows').innerHTML = '';
+    $('#btnSaveTx').disabled = false;
+  }
+};
+
+window.addSplitRow = function(catId=null, amount=''){
+  let tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td>
+      <select class="split-cat" style="width:100%" required>
+        <option value="">Sélectionner une catégorie...</option>
+        ${state.categories.map(c=>`<option value="${c.id}" ${c.id===catId?'selected':''}>${esc(c.group_name)} — ${esc(c.name)}</option>`).join('')}
+      </select>
+    </td>
+    <td>
+      <input type="number" step="0.01" class="split-amt" value="${amount}" placeholder="0.00" style="width:100%;text-align:right" required oninput="updateSplitCalculation()">
+    </td>
+    <td>
+      <button type="button" class="btn-icon danger" onclick="this.closest('tr').remove();updateSplitCalculation()">✕</button>
+    </td>
+  `;
+  $('#splitRows').appendChild(tr);
+  updateSplitCalculation();
+};
+
+window.updateSplitCalculation = function(){
+  if(!isSplitMode) return;
+  let totalTx = parseFloat($('#txAmount').value || 0);
+  let rows = [...$$('#splitRows tr')];
+  let sumSplits = rows.reduce((acc, tr) => {
+    let v = parseFloat(tr.querySelector('.split-amt').value || 0);
+    return acc + v;
+  }, 0);
+  
+  let remaining = Math.round((totalTx - sumSplits) * 100) / 100;
+  let ind = $('#splitBalanceIndicator');
+  let btnSave = $('#btnSaveTx');
+  
+  if(Math.abs(remaining) < 0.001 && rows.length >= 2){
+    ind.innerHTML = `<span style="color:var(--green)">✓ Équilibré (${cash(sumSplits)})</span>`;
+    btnSave.disabled = false;
+  }else{
+    ind.innerHTML = `<span style="color:#b42318">Reste à répartir : ${cash(remaining)} (Total: ${cash(totalTx)})</span>`;
+    btnSave.disabled = true;
+  }
+};
+
+$('#txAmount').oninput = function(){
+  if(isSplitMode) updateSplitCalculation();
+};
+
 $('#txForm').onsubmit=async e=>{
   e.preventDefault();
   let p=Object.fromEntries(new FormData(e.target));
   p.cleared=$('#txForm [name=cleared]').checked;
   p.approved=$('#txForm [name=approved]').checked;
   ['account_id','category_id','transfer_account_id'].forEach(k=>p[k]=p[k]?+p[k]:null);
+  
+  if(isSplitMode){
+    let rows = [...$$('#splitRows tr')];
+    let splits = rows.map(tr => ({
+      category_id: +tr.querySelector('.split-cat').value,
+      amount: parseFloat(tr.querySelector('.split-amt').value || 0)
+    })).filter(s => s.category_id && s.amount !== 0);
+    p.splits = splits;
+    p.category_id = null;
+  }
+  
   await api('transactions',{method:'POST',body:JSON.stringify(p)});
   $('#txModal').close();
   e.target.reset();
+  toggleSplitMode(false);
   await seed();
   renderTransactions();
   renderBudget();

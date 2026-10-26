@@ -1,8 +1,52 @@
-<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0b5d5c"><link rel="manifest" href="/manifest.json"><link rel="stylesheet" href="/style.css?v=2.1"><title>Budget Libre</title></head><body>
+<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0b5d5c"><link rel="manifest" href="/manifest.json"><link rel="stylesheet" href="/style.css?v=2.2"><title>Budget Libre</title></head><body>
 <header><div class="brand">◒ <b>Budget Libre</b><small>v2</small></div><label class="profile-picker">Profil <select id="profileSelect"></select></label><button id="newProfile" title="Créer un profil">＋</button><div id="summary"></div><button class="menu" onclick="document.body.classList.toggle('nav-open')">☰</button></header>
 <aside><button data-page="budget" class="active">▦ Budget</button><button data-page="transactions">↕ Transactions</button><button data-page="accounts">▣ Comptes</button><button data-page="rules">⚙ Règles & import</button><button data-page="reports">◔ Rapports</button><button data-page="settings">⌁ Sauvegarde</button><hr><button onclick="openModal('categoryModal')">＋ Catégorie</button><button onclick="openModal('txModal')">＋ Transaction</button></aside>
 <main><section id="budget" class="page"></section><section id="transactions" class="page hidden"></section><section id="accounts" class="page hidden"></section><section id="rules" class="page hidden"></section><section id="reports" class="page hidden"></section><section id="settings" class="page hidden"></section></main>
-<dialog id="txModal"><form method="dialog" id="txForm"><div class="modalhead"><h2>Nouvelle transaction</h2><button type="button" data-close="txModal" aria-label="Fermer">×</button></div><div class="formgrid"><label>Compte<select name="account_id" required id="txAccount"></select></label><label>Date<input name="tx_date" type="date" required></label><label>Bénéficiaire<input name="payee" placeholder="Ex. Marché local"></label><label>Montant<input name="amount" type="number" step="0.01" required placeholder="-42.50"></label><label>Catégorie<select name="category_id" id="txCategory"><option value="">Entrée à répartir</option></select></label><label>Transfert vers<select name="transfer_account_id" id="txTransfer"><option value="">Aucun</option></select></label><label class="wide">Mémo<input name="memo"></label><label class="check"><input name="cleared" type="checkbox"> Déjà compensée</label><label class="check"><input name="approved" type="checkbox" checked> Approuvée</label></div><p class="hint">Montant négatif = dépense. Pour une transaction fractionnée, ajoutez une transaction par catégorie (même date/bénéficiaire).</p><footer><button class="primary">Enregistrer</button></footer></form></dialog>
+<dialog id="txModal" style="width:min(640px, calc(100% - 24px))"><form method="dialog" id="txForm"><div class="modalhead"><h2>Nouvelle transaction</h2><button type="button" data-close="txModal" aria-label="Fermer">✕</button></div>
+<div class="formgrid">
+  <label>Compte<select name="account_id" required id="txAccount"></select></label>
+  <label>Date<input name="tx_date" type="date" required></label>
+  <label>Bénéficiaire<input name="payee" placeholder="Ex. Marché local"></label>
+  <label>Montant total<input name="amount" id="txAmount" type="number" step="0.01" required placeholder="-42.50"></label>
+  
+  <div id="singleCatContainer" style="display:grid;gap:5px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <span style="font-size:13px;color:#476464;">Catégorie</span>
+      <button type="button" class="btn-icon" style="color:var(--teal);font-size:12px;font-weight:600" onclick="toggleSplitMode(true)">✂️ Ventiler (Split)</button>
+    </div>
+    <select name="category_id" id="txCategory"><option value="">Entrée à répartir</option></select>
+  </div>
+  
+  <label id="txTransferLabel">Transfert vers<select name="transfer_account_id" id="txTransfer"><option value="">Aucun</option></select></label>
+  <label class="wide">Mémo<input name="memo"></label>
+  <label class="check"><input name="cleared" type="checkbox"> Déjà compensée</label>
+  <label class="check"><input name="approved" type="checkbox" checked> Approuvée</label>
+</div>
+
+<!-- Section de ventilation dynamique -->
+<div id="splitSection" style="display:none;margin-top:16px;border-top:1px dashed var(--line);padding-top:14px;">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+    <b>Répartition par catégories</b>
+    <button type="button" class="btn-icon" style="color:#b42318;font-size:12px;" onclick="toggleSplitMode(false)">✕ Annuler la ventilation</button>
+  </div>
+  <table style="width:100%;margin-bottom:8px;">
+    <thead>
+      <tr>
+        <th>Catégorie</th>
+        <th class="number" style="width:120px;">Montant</th>
+        <th style="width:40px;"></th>
+      </tr>
+    </thead>
+    <tbody id="splitRows"></tbody>
+  </table>
+  <div style="display:flex;justify-content:space-between;align-items:center;">
+    <button type="button" class="btn-icon" onclick="addSplitRow()" style="color:var(--teal);font-weight:600;">➕ Ajouter une ligne</button>
+    <div id="splitBalanceIndicator" style="font-size:13px;font-weight:600;"></div>
+  </div>
+</div>
+
+<p class="hint" style="margin-top:12px;">Montant négatif = dépense. Les opérations ventilées répartissent l'activité sur chaque catégorie choisie.</p>
+<footer><button class="primary" id="btnSaveTx">Enregistrer</button></footer></form></dialog>
 <dialog id="categoryModal"><form method="dialog" id="categoryForm"><div class="modalhead"><h2>Nouvelle catégorie</h2><button type="button" data-close="categoryModal" aria-label="Fermer">×</button></div><div class="formgrid"><label>Groupe<select name="group_id" id="catGroup"></select></label><label>Nom<input name="name" required></label><label>Nature<select name="nature"><option>Dépense</option><option>Épargne</option><option>Dette</option><option>Revenu</option></select></label><label>Type d’épargne<input name="saving_type" placeholder="Urgence, vacances…"></label></div><footer><button class="primary">Créer</button></footer></form></dialog>
 <dialog id="accountModal"><form method="dialog" id="accountForm"><div class="modalhead"><h2>Nouveau compte</h2><button type="button" data-close="accountModal" aria-label="Fermer">×</button></div><div class="formgrid"><label>Nom du compte<input name="name" required placeholder="Ex. Compte courant"></label><label>Type<select name="kind"><option value="checking">Chèques / courant</option><option value="savings">Épargne</option><option value="cash">Espèces</option><option value="credit">Carte de crédit</option><option value="loan">Prêt</option></select></label><label>Solde d’ouverture<input name="opening_balance" type="number" step="0.01" value="0" required></label></div><footer><button class="primary">Créer le compte</button></footer></form></dialog>
 <dialog id="targetModal"><form method="dialog" id="targetForm"><div class="modalhead"><h2>Configurer une cible</h2><button type="button" data-close="targetModal" aria-label="Fermer">×</button></div><input type="hidden" name="category_id" id="targetCategoryId"><div class="formgrid"><label>Type de cible<select name="kind"><option value="refill">Renflouer une enveloppe</option><option value="set_aside">Mettre de côté</option><option value="project">Économie de projet</option></select></label><label>Montant cible<input name="amount" type="number" min="0" step="0.01" required></label><label>Rythme<select name="frequency"><option value="weekly">Chaque semaine</option><option value="biweekly">Aux deux semaines</option><option value="monthly" selected>Chaque mois</option><option value="yearly">Chaque année</option></select></label><label>Jour requis (1 à 31)<input name="due_day" type="number" min="1" max="31" placeholder="Ex. 20"></label><label>Jour de semaine<select name="due_weekday"><option value="">Sans objet</option><option value="0">Lundi</option><option value="1">Mardi</option><option value="2">Mercredi</option><option value="3">Jeudi</option><option value="4">Vendredi</option><option value="5">Samedi</option><option value="6">Dimanche</option></select></label><label>Date finale / échéance<input name="due_date" type="date"></label><label class="wide">Note<input name="note" placeholder="Ex. facture de loyer"></label></div><p class="hint">Renflouer garde le solde restant pour la période suivante. Mettre de côté calcule le montant restant jusqu’à l’échéance. Une cible de projet crée automatiquement une « Banque de projet ».</p><footer><button class="primary">Enregistrer la cible</button></footer></form></dialog>
@@ -72,4 +116,4 @@
     <button type="button" data-close="activityModal">Fermer</button>
   </footer>
 </dialog>
-<script src="/app.js?v=2.1"></script></body></html>
+<script src="/app.js?v=2.2"></script></body></html>
