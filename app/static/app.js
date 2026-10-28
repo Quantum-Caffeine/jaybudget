@@ -1,5 +1,5 @@
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-let state={accounts:[],categories:[],groups:[],profiles:[],payees:[],profile:+localStorage.getItem('budget-profile')||1,month:new Date().toISOString().slice(0,7)};
+let state={accounts:[],categories:[],groups:[],profiles:[],payees:[],currentAccountId:null,profile:+localStorage.getItem('budget-profile')||1,month:new Date().toISOString().slice(0,7)};
 const api=async(u,o={})=>{let r=await fetch('/api/'+u,{headers:o.body instanceof FormData?{}:{'Content-Type':'application/json'},...o});if(!r.ok)throw new Error(await r.text());return r.headers.get('content-type')?.includes('json')?r.json():r};
 const cash=n=>new Intl.NumberFormat('fr-CA',{style:'currency',currency:'CAD'}).format(n||0);
 const esc=s=>String(s??'').replace(/[&<>"']/g,x=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[x]));
@@ -23,8 +23,39 @@ async function seed(){
     $('#payeesList').innerHTML=state.payees.map(p=>`<option value="${esc(p.name)}">`).join('');
   }
   
-  $('#txForm [name=tx_date]').value=new Date().toISOString().slice(0,10);
+    $('#txForm [name=tx_date]').value=new Date().toISOString().slice(0,10);
+  updateSidebarAccounts();
 }
+
+
+function updateSidebarAccounts(){
+  let el = $('#sidebarAccounts');
+  if(!el) return;
+  el.innerHTML = state.accounts.map(a => `
+    <button class="sidebar-acc-btn ${state.currentAccountId === a.id ? 'active' : ''}" onclick="filterByAccount(${a.id})">
+      <span class="sidebar-acc-name" title="${esc(a.name)}">${esc(a.name)}</span>
+      <span class="sidebar-acc-bal ${a.balance < 0 ? 'bad' : 'good'}">${cash(a.balance)}</span>
+    </button>
+  `).join('');
+}
+
+window.filterByAccount = async function(accId){
+  state.currentAccountId = accId;
+  $$('aside button').forEach(x => x.classList.remove('active'));
+  let btnTx = $('aside [data-page="transactions"]');
+  if(btnTx) btnTx.classList.add('active');
+  $$('.page').forEach(x => x.classList.add('hidden'));
+  $('#transactions').classList.remove('hidden');
+  document.body.classList.remove('nav-open');
+  updateSidebarAccounts();
+  await renderTransactions();
+};
+
+window.clearAccountFilter = async function(){
+  state.currentAccountId = null;
+  updateSidebarAccounts();
+  await renderTransactions();
+};
 
 async function home(){
   let d=await api('dashboard?month='+state.month+'&'+qs());
@@ -238,56 +269,70 @@ window.showActivity=async function(catId, catName){
 // VUE TRANSACTIONS AVEC CATÉGORISATION INLINE
 // -------------------------------------------------------------
 async function renderTransactions(){
-  let tx=await api('transactions?month='+state.month+'&'+qs());
+  let url = 'transactions?month=' + state.month + '&' + qs();
+  if(state.currentAccountId){
+    url += '&account_id=' + state.currentAccountId;
+  }
+  let tx = await api(url);
   
-  let unapprovedCount = tx.filter(t=>!t.approved).length;
+  let unapprovedCount = tx.filter(t => !t.approved).length;
   let banner = '';
   if(unapprovedCount > 0){
     banner = `<div style="background:#fef3f2;border:1px solid #fecdca;color:#b42318;padding:10px 14px;border-radius:8px;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;">
-      <span>⚠️ <b>${unapprovedCount} transaction(s)</b> en attente d'approbation pour ce mois.</span>
+      <span>⚠️ <b>${unapprovedCount} transaction(s)</b> en attente d'approbation pour ce filtre.</span>
       <button class="primary" style="background:#b42318;border-color:#b42318;padding:6px 12px;font-size:13px;" onclick="approveAll()">✅ Tout approuver</button>
     </div>`;
   }
   
-  let rows=tx.map(t=>{
-    let catSelect='';
+  let currentAcc = state.accounts.find(a => a.id === state.currentAccountId);
+  let title = currentAcc ? esc(currentAcc.name) : 'Toutes les transactions';
+  let accountFilterBadge = currentAcc ? `
+    <span class="tag" style="background:#e0f2fe;color:#0369a1;font-size:13px;padding:4px 8px;display:inline-flex;align-items:center;gap:6px;">
+      Compte : <b>${esc(currentAcc.name)}</b> (Solde: ${cash(currentAcc.balance)})
+      <button type="button" class="btn-icon" style="color:#0369a1;padding:0;" onclick="clearAccountFilter()" title="Afficher tous les comptes">✕</button>
+    </span>
+  ` : '';
+
+  let rows = tx.map(t => {
+    let catSelect = '';
     let splits = [];
     try { splits = JSON.parse(t.splits || '[]'); } catch(e){}
     
     if(t.transfer_account_id){
-      catSelect=`<span class="tag">Transfert</span>`;
+      catSelect = `<span class="tag">Transfert</span>`;
     }else if(splits && splits.length > 0){
       let splitDetails = splits.map(s => {
         let cat = state.categories.find(c => c.id === s.category_id);
         return `${cat ? cat.name : 'Catégorie inconnue'}: ${cash(s.amount)}`;
       }).join('&#10;');
-      catSelect=`<span class="tag clickable" style="background:#e0f2fe;color:#0369a1;" title="${splitDetails}">✂️ Ventilée (${splits.length})</span>`;
+      catSelect = `<span class="tag clickable" style="background:#e0f2fe;color:#0369a1;" title="${splitDetails}">✂️ Ventilée (${splits.length})</span>`;
     }else{
-      catSelect=`<select class="cat-select-inline" onchange="patchTx(${t.id},{category_id:this.value?+this.value:null})">
+      catSelect = `<select class="cat-select-inline" onchange="patchTx(${t.id},{category_id:this.value?+this.value:null})">
         <option value="">Entrée à répartir</option>
-        ${state.categories.map(c=>`<option value="${c.id}" ${c.id===t.category_id?'selected':''}>${esc(c.group_name)} — ${esc(c.name)}</option>`).join('')}
+        ${state.categories.map(c => `<option value="${c.id}" ${c.id === t.category_id ? 'selected' : ''}>${esc(c.group_name)} — ${esc(c.name)}</option>`).join('')}
       </select>`;
     }
     return `<tr>
       <td>${t.tx_date}</td>
       <td>${esc(t.account_name)}</td>
-      <td><b>${esc(t.payee||'—')}</b>${t.memo?'<br><span class="small">'+esc(t.memo)+'</span>':''}</td>
+      <td><b>${esc(t.payee || '—')}</b>${t.memo ? '<br><span class="small">' + esc(t.memo) + '</span>' : ''}</td>
       <td>${catSelect}</td>
-      <td class="number ${t.amount<0?'bad':'good'}">${cash(t.amount)}</td>
+      <td class="number ${t.amount < 0 ? 'bad' : 'good'}">${cash(t.amount)}</td>
       <td>
-        <input type="checkbox" ${t.cleared?'checked':''} onchange="patchTx(${t.id},{cleared:this.checked})" title="Compensée">
-        <input type="checkbox" ${t.approved?'checked':''} onchange="patchTx(${t.id},{approved:this.checked})" title="Approuvée">
+        <input type="checkbox" ${t.cleared ? 'checked' : ''} onchange="patchTx(${t.id},{cleared:this.checked})" title="Compensée">
+        <input type="checkbox" ${t.approved ? 'checked' : ''} onchange="patchTx(${t.id},{approved:this.checked})" title="Approuvée">
       </td>
       <td><button class="btn-icon danger" onclick="deleteTx(${t.id})" title="Supprimer la transaction">✕</button></td>
     </tr>`;
   }).join('');
 
-  $('#transactions').innerHTML=page('Transactions',`
+  $('#transactions').innerHTML = page(title, `
     <div style="display:flex;align-items:center;gap:6px">
       <button class="btn-icon" title="Mois précédent" onclick="shiftTxMonth(-1)">◀</button>
       <input type="month" value="${state.month}" onchange="state.month=this.value;renderTransactions()" style="font-weight:600">
       <button class="btn-icon" title="Mois suivant" onclick="shiftTxMonth(1)">▶</button>
     </div>
+    ${accountFilterBadge}
     <input id="searchTx" placeholder="Rechercher..." oninput="searchTx(this.value)">
     <button class="primary" onclick="openModal('txModal')">➕ Transaction</button>
   `, `
@@ -295,11 +340,12 @@ async function renderTransactions(){
     <div class="card">
       <table>
         <thead><tr><th>Date</th><th>Compte</th><th>Bénéficiaire</th><th>Catégorie</th><th class="number">Montant</th><th>État</th><th></th></tr></thead>
-        <tbody id="txRows">${rows||'<tr><td colspan="7" class="empty">Aucune transaction pour ce mois.</td></tr>'}</tbody>
+        <tbody id="txRows">${rows || '<tr><td colspan="7" class="empty">Aucune transaction pour ce mois.</td></tr>'}</tbody>
       </table>
     </div>
   `);
 }
+
 
 window.approveAll = async function(){
   try {
@@ -525,6 +571,10 @@ const renders={budget:renderBudget,transactions:renderTransactions,accounts:rend
 $$('aside [data-page]').forEach(b=>b.onclick=async()=>{
   $$('aside button').forEach(x=>x.classList.remove('active'));
   b.classList.add('active');
+  if(b.dataset.page === 'transactions'){
+    state.currentAccountId = null; // Voir tous les comptes par défaut
+    updateSidebarAccounts();
+  }
   $$('.page').forEach(x=>x.classList.add('hidden'));
   $('#'+b.dataset.page).classList.remove('hidden');
   document.body.classList.remove('nav-open');

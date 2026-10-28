@@ -13,3 +13,14 @@
 tr:hover .cat-actions{opacity:1}
 .group-actions{float:right;display:inline-flex;gap:4px}
 .subtext{font-size:11px;color:#6b8080}
+
+/* Styles des comptes dans la barre latérale */
+aside{overflow-y:auto;display:flex;flex-direction:column;}
+.sidebar-section-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#7aa5a4;margin:14px 8px 6px;padding-top:8px;border-top:1px solid #367272}
+.sidebar-acc-btn{display:flex;justify-content:space-between;align-items:center;width:100%;padding:8px 10px;font-size:13px;border-radius:6px;border:none;background:none;color:#d6e9e8;cursor:pointer;text-align:left;}
+.sidebar-acc-btn:hover{background:#276b6a;color:white;}
+.sidebar-acc-btn.active{background:#276b6a;color:white;font-weight:600;}
+.sidebar-acc-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding-right:6px;}
+.sidebar-acc-bal{font-variant-numeric:tabular-nums;font-size:12px;white-space:nowrap;opacity:0.9;}
+.sidebar-acc-bal.bad{color:#ff9b9b;}
+.sidebar-acc-bal.good{color:#86efac;}
