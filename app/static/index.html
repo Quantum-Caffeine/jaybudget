@@ -1,4 +1,4 @@
-<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0b5d5c"><link rel="manifest" href="/manifest.json"><link rel="stylesheet" href="/style.css?v=2.2"><title>Budget Libre</title></head><body>
+<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0b5d5c"><link rel="manifest" href="/manifest.json"><link rel="stylesheet" href="/style.css?v=2.3"><title>Budget Libre</title></head><body>
 <header><div class="brand">◒ <b>Budget Libre</b><small>v2</small></div><label class="profile-picker">Profil <select id="profileSelect"></select></label><button id="newProfile" title="Créer un profil">＋</button><div id="summary"></div><button class="menu" onclick="document.body.classList.toggle('nav-open')">☰</button></header>
 <aside><button data-page="budget" class="active">▦ Budget</button><button data-page="transactions">↕ Transactions</button><button data-page="accounts">▣ Comptes</button><button data-page="rules">⚙ Règles & import</button><button data-page="reports">◔ Rapports</button><button data-page="settings">⌁ Sauvegarde</button><hr><button onclick="openModal('categoryModal')">＋ Catégorie</button><button onclick="openModal('txModal')">＋ Transaction</button></aside>
 <main><section id="budget" class="page"></section><section id="transactions" class="page hidden"></section><section id="accounts" class="page hidden"></section><section id="rules" class="page hidden"></section><section id="reports" class="page hidden"></section><section id="settings" class="page hidden"></section></main>
@@ -6,7 +6,7 @@
 <div class="formgrid">
   <label>Compte<select name="account_id" required id="txAccount"></select></label>
   <label>Date<input name="tx_date" type="date" required></label>
-  <label>Bénéficiaire<input name="payee" placeholder="Ex. Marché local"></label>
+  <label>Bénéficiaire<input name="payee" id="txPayee" list="payeesList" placeholder="Ex. Marché local" autocomplete="off"><datalist id="payeesList"></datalist></label>
   <label>Montant total<input name="amount" id="txAmount" type="number" step="0.01" required placeholder="-42.50"></label>
   
   <div id="singleCatContainer" style="display:grid;gap:5px;">
@@ -116,4 +116,4 @@
     <button type="button" data-close="activityModal">Fermer</button>
   </footer>
 </dialog>
-<script src="/app.js?v=2.2"></script></body></html>
+<script src="/app.js?v=2.3"></script></body></html>

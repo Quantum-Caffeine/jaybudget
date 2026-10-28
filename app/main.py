@@ -135,8 +135,16 @@ def category_amount(tx):
   s=json.loads(tx['splits'] or '[]')
   return s if s else ([{'category_id':tx['category_id'],'amount':tx['amount']}] if tx['category_id'] else [])
 def apply_rules(c,payee):
+  if not payee: return None
+  # 1. Règles explicites configurées
   for r in c.execute('SELECT rules.*,payees.name payee_name FROM rules LEFT JOIN payees ON payees.id=rules.payee_id WHERE active=1').fetchall():
     if re.search(r['pattern'],payee,re.I): return dict(r)
+  # 2. Règle intelligente basée sur l'historique : catégorie la plus fréquente / récente pour ce marchand
+  hist = c.execute('''SELECT category_id, memo FROM transactions 
+                      WHERE LOWER(TRIM(payee))=LOWER(TRIM(?)) AND category_id IS NOT NULL 
+                      GROUP BY category_id ORDER BY COUNT(*) DESC, tx_date DESC LIMIT 1''', (payee,)).fetchone()
+  if hist:
+    return {'category_id': hist['category_id'], 'memo': hist['memo'] or ''}
   return None
 def tx_create(c,p):
   p={**p}; p['amount']=money(p.get('amount')); p['tx_date']=p.get('tx_date') or date.today().isoformat()
@@ -344,6 +352,17 @@ def rules(profile_id:int=1):
 @app.post('/api/rules')
 def rule(p:dict):
  with db() as c:return {'id':c.execute('INSERT INTO rules(pattern,category_id,memo) VALUES(?,?,?)',(p['pattern'],p.get('category_id'),p.get('memo',''))).lastrowid}
+
+@app.get('/api/payees')
+def get_payees(profile_id:int=1):
+ with db() as c:
+  sql = '''SELECT t.payee as name, t.category_id, COUNT(*) as count 
+           FROM transactions t 
+           JOIN accounts a ON a.id=t.account_id 
+           WHERE a.profile_id=? AND t.payee IS NOT NULL AND TRIM(t.payee)!='' 
+           GROUP BY LOWER(TRIM(t.payee)) 
+           ORDER BY count DESC, t.tx_date DESC LIMIT 300'''
+  return rows(c, sql, (profile_id,))
 
 def parse_ofx(raw):
  text=raw.decode('cp1252',errors='replace').replace('\r','')

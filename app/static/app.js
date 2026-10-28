@@ -1,5 +1,5 @@
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-let state={accounts:[],categories:[],groups:[],profiles:[],profile:+localStorage.getItem('budget-profile')||1,month:new Date().toISOString().slice(0,7)};
+let state={accounts:[],categories:[],groups:[],profiles:[],payees:[],profile:+localStorage.getItem('budget-profile')||1,month:new Date().toISOString().slice(0,7)};
 const api=async(u,o={})=>{let r=await fetch('/api/'+u,{headers:o.body instanceof FormData?{}:{'Content-Type':'application/json'},...o});if(!r.ok)throw new Error(await r.text());return r.headers.get('content-type')?.includes('json')?r.json():r};
 const cash=n=>new Intl.NumberFormat('fr-CA',{style:'currency',currency:'CAD'}).format(n||0);
 const esc=s=>String(s??'').replace(/[&<>"']/g,x=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[x]));
@@ -7,8 +7,8 @@ function openModal(id){$('#'+id).showModal()} window.openModal=openModal;
 const qs=()=>`profile_id=${state.profile}`;
 
 async function seed(){
-  [state.profiles,state.accounts,state.categories,state.groups]=await Promise.all([
-    api('profiles'),api('accounts?'+qs()),api('categories?'+qs()),api('groups?'+qs())
+  [state.profiles,state.accounts,state.categories,state.groups,state.payees]=await Promise.all([
+    api('profiles'),api('accounts?'+qs()),api('categories?'+qs()),api('groups?'+qs()),api('payees?'+qs())
   ]);
   $('#profileSelect').innerHTML=state.profiles.map(p=>`<option value="${p.id}" ${p.id===state.profile?'selected':''}>${esc(p.name)}</option>`).join('');
   const accountOpts=state.accounts.map(a=>`<option value="${a.id}">${esc(a.name)} (${cash(a.balance)})</option>`).join('');
@@ -17,6 +17,12 @@ async function seed(){
   $('#txCategory').innerHTML='<option value="">Entrée à répartir</option>'+state.categories.map(c=>`<option value="${c.id}">${esc(c.group_name)} — ${esc(c.name)}</option>`).join('');
   $('#catGroup').innerHTML=state.groups.map(g=>`<option value="${g.id}">${esc(g.name)}</option>`).join('');
   $('#editCatGroup').innerHTML=state.groups.map(g=>`<option value="${g.id}">${esc(g.name)}</option>`).join('');
+  
+  // Remplir la liste d'autocomplétion des marchands
+  if($('#payeesList')){
+    $('#payeesList').innerHTML=state.payees.map(p=>`<option value="${esc(p.name)}">`).join('');
+  }
+  
   $('#txForm [name=tx_date]').value=new Date().toISOString().slice(0,10);
 }
 
@@ -593,6 +599,17 @@ window.updateSplitCalculation = function(){
     btnSave.disabled = true;
   }
 };
+
+
+// Auto-remplissage de la catégorie basé sur le marchand
+$('#txPayee')?.addEventListener('input', function(){
+  let val = this.value.trim().toLowerCase();
+  if(!val || isSplitMode) return;
+  let match = state.payees.find(p => p.name.trim().toLowerCase() === val);
+  if(match && match.category_id){
+    $('#txCategory').value = match.category_id;
+  }
+});
 
 $('#txAmount').oninput = function(){
   if(isSplitMode) updateSplitCalculation();
