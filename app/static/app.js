@@ -101,8 +101,13 @@ async function renderBudget(){
       <td class="number ${c.activity<0?'bad':''}">
         <span class="clickable" title="Voir le détail des opérations du mois" onclick="showActivity(${c.id},'${esc(c.name)}')">${cash(c.activity)}</span>
       </td>
-      <td class="number available ${c.available<0?'bad':'good'}">
-        <span class="clickable" title="Cliquer pour déplacer de l'argent vers une autre catégorie" onclick="openMoveMoney(${c.id},'${esc(c.name)}',${c.available})">${cash(c.available)}</span>
+      <td class="number available">
+        <div style="display:inline-flex;align-items:center;justify-content:flex-end;gap:5px">
+          ${c.available < 0 ? (c.overspending_type === 'credit' ? '<span class="badge-pill badge-credit" title="Dépassement par carte de crédit">💳 Crédit</span>' : '<span class="badge-pill badge-cash" title="Dépassement en espèces / chèques">⚠️ Cash</span>') : ''}
+          <span class="pill-avail ${c.available < 0 ? (c.overspending_type === 'credit' ? 'credit-overspent' : 'cash-overspent') : (c.available === 0 ? 'zero' : 'good')} clickable" 
+                title="${c.available < 0 ? (c.overspending_type === 'credit' ? 'Dépassement par carte de crédit (dette non budgétée). Cliquer pour combler.' : 'Dépassement de liquidités (impacte le Prêt à répartir !). Cliquer pour combler.') : (c.available === 0 ? 'Solde nul. Cliquer pour déplacer.' : 'Disponible. Cliquer pour déplacer.')}" 
+                onclick="openMoveMoney(${c.id},'${esc(c.name)}',${c.available})">${cash(c.available)}</span>
+        </div>
       </td>
     </tr>`;
   }

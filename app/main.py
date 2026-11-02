@@ -199,11 +199,44 @@ def budget(month: str=month_now(), profile_id:int=1):
   prior_assigned={r['category_id']:r['total'] for r in rows(c,'SELECT category_id,COALESCE(SUM(assigned),0) total FROM category_month WHERE month<? GROUP BY category_id',(month,))}
   prior_direct={r['category_id']:r['total'] for r in rows(c,"SELECT t.category_id,COALESCE(SUM(t.amount),0) total FROM transactions t WHERE t.splits='[]' AND t.category_id IS NOT NULL AND t.tx_date<? GROUP BY t.category_id",(month+'-01',))}
   prior_splits={r['cat_id']:r['total'] for r in rows(c,"SELECT CAST(json_extract(j.value,'$.category_id') AS INTEGER) cat_id,COALESCE(SUM(CAST(json_extract(j.value,'$.amount') AS REAL)),0) total FROM transactions t,json_each(t.splits) j WHERE t.splits!='[]' AND t.tx_date<? GROUP BY cat_id",(month+'-01',))}
+  
+  # Activité du mois ventilée par type de compte (cash vs crédit)
+  cur_direct = rows(c, '''SELECT t.category_id, a.kind, COALESCE(SUM(t.amount), 0) total
+    FROM transactions t JOIN accounts a ON a.id=t.account_id
+    WHERE t.splits=\'[]\' AND t.category_id IS NOT NULL AND substr(t.tx_date,1,7)=?
+    GROUP BY t.category_id, a.kind''', (month,))
+  cur_splits = rows(c, '''SELECT CAST(json_extract(j.value,'$.category_id') AS INTEGER) cat_id, a.kind, COALESCE(SUM(CAST(json_extract(j.value,'$.amount') AS REAL)), 0) total
+    FROM transactions t JOIN accounts a ON a.id=t.account_id, json_each(t.splits) j
+    WHERE t.splits!=\'[]\' AND substr(t.tx_date,1,7)=?
+    GROUP BY cat_id, a.kind''', (month,))
+  
+  month_cash = {}
+  month_credit = {}
+  for r in cur_direct:
+   cid = r['category_id']
+   if r['kind'] == 'credit': month_credit[cid] = month_credit.get(cid, 0.0) + r['total']
+   else: month_cash[cid] = month_cash.get(cid, 0.0) + r['total']
+  for r in cur_splits:
+   cid = r['cat_id']
+   if r['kind'] == 'credit': month_credit[cid] = month_credit.get(cid, 0.0) + r['total']
+   else: month_cash[cid] = month_cash.get(cid, 0.0) + r['total']
+
   today=date.today()
   for x in out:
    cid=x['id']
    prior=prior_assigned.get(cid,0)+prior_direct.get(cid,0)+prior_splits.get(cid,0)
+   c_cash = month_cash.get(cid, 0.0)
+   c_credit = month_credit.get(cid, 0.0)
+   x['cash_activity'] = money(c_cash)
+   x['credit_activity'] = money(c_credit)
    x['available']=money(prior+x['assigned']+x['activity'])
+   if x['available'] < 0:
+    if (prior + x['assigned'] + c_cash) < 0:
+     x['overspending_type'] = 'cash'
+    else:
+     x['overspending_type'] = 'credit'
+   else:
+    x['overspending_type'] = None
    x['recommendation']=target_recommendation(x,x['available'],today)
   return out
 
