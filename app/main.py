@@ -213,6 +213,47 @@ def assign(p:dict):
   c.execute('INSERT INTO category_month(category_id,month,assigned) VALUES(?,?,?) ON CONFLICT(category_id,month) DO UPDATE SET assigned=excluded.assigned',(p['category_id'],p['month'],money(p['assigned'])))
  return {'ok':True}
 
+@app.post('/api/quick-assign')
+def quick_assign(p:dict):
+ month = p.get('month')
+ mode = p.get('mode', 'underfunded') # underfunded, last_month, reset
+ profile_id = int(p.get('profile_id', 1))
+ if not month: raise HTTPException(400, 'Mois requis')
+ 
+ count = 0
+ with db() as c:
+  if mode == 'reset':
+   cur = c.execute('''DELETE FROM category_month WHERE month=? AND category_id IN 
+     (SELECT ca.id FROM categories ca JOIN groups g ON g.id=ca.group_id WHERE g.profile_id=?)''', (month, profile_id))
+   count = cur.rowcount
+  elif mode == 'last_month':
+   # Calcul du mois précédent
+   y, m = map(int, month.split('-'))
+   prev_date = (date(y, m, 1) - timedelta(days=1))
+   prev_month = prev_date.strftime('%Y-%m')
+   prev_assigned = rows(c, '''SELECT cm.category_id, cm.assigned FROM category_month cm 
+     JOIN categories ca ON ca.id=cm.category_id 
+     JOIN groups g ON g.id=ca.group_id 
+     WHERE cm.month=? AND g.profile_id=?''', (prev_month, profile_id))
+   for row in prev_assigned:
+    if row['assigned'] > 0:
+     c.execute('''INSERT INTO category_month(category_id, month, assigned) VALUES(?,?,?) 
+       ON CONFLICT(category_id, month) DO UPDATE SET assigned=excluded.assigned''', 
+       (row['category_id'], month, money(row['assigned'])))
+     count += 1
+  else: # underfunded : assigner selon la recommandation de cible
+   b_list = budget(month=month, profile_id=profile_id)
+   for cat in b_list:
+    rec = cat.get('recommendation') or 0
+    if rec > 0:
+     new_val = money(cat.get('assigned', 0) + rec)
+     c.execute('''INSERT INTO category_month(category_id, month, assigned) VALUES(?,?,?) 
+       ON CONFLICT(category_id, month) DO UPDATE SET assigned=excluded.assigned''', 
+       (cat['id'], month, new_val))
+     count += 1
+     
+ return {'ok': True, 'count': count, 'mode': mode}
+
 @app.get('/api/groups')
 def groups(profile_id:int=1):
  with db() as c: return rows(c,'SELECT id,COALESCE(label,name) name,position,profile_id FROM groups WHERE profile_id=? ORDER BY position,name',(profile_id,))

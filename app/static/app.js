@@ -113,6 +113,15 @@ async function renderBudget(){
       <input type="month" value="${state.month}" onchange="state.month=this.value;renderBudget();home()" style="font-weight:600">
       <button class="btn-icon" title="Mois suivant" onclick="shiftMonth(1)">▶</button>
     </div>
+    <div class="dropdown">
+      <button type="button" class="btn-secondary" onclick="toggleQuickAssignMenu(event)" title="Options d'assignation automatique">⚡ Auto-assigner ▾</button>
+      <div id="quickAssignMenu" class="dropdown-menu">
+        <button type="button" class="dropdown-item" onclick="runQuickAssign('underfunded')">🎯 <b>Selon les cibles</b><br><span class="subtext">Combler le besoin des catégories</span></button>
+        <button type="button" class="dropdown-item" onclick="runQuickAssign('last_month')">📋 <b>Copier le mois dernier</b><br><span class="subtext">Reprendre les assignations passées</span></button>
+        <hr class="dropdown-divider">
+        <button type="button" class="dropdown-item danger-item" onclick="runQuickAssign('reset')">🗑️ <b>Réinitialiser à zéro</b><br><span class="subtext">Effacer les assignations de ce mois</span></button>
+      </div>
+    </div>
     <button class="primary" onclick="openModal('categoryModal')">➕ Catégorie</button>
     <button class="primary" onclick="openModal('txModal')">➕ Transaction</button>
   `, `
@@ -144,6 +153,45 @@ window.assign=async(id,value)=>{
   renderBudget();
   home();
 };
+
+window.toggleQuickAssignMenu=function(e){
+  e.stopPropagation();
+  let m=document.getElementById('quickAssignMenu');
+  if(m) m.classList.toggle('show');
+};
+
+window.runQuickAssign=async function(mode){
+  let m=document.getElementById('quickAssignMenu');
+  if(m) m.classList.remove('show');
+  
+  if(mode==='reset'){
+    if(!confirm(`Êtes-vous certain de vouloir réinitialiser toutes les assignations pour le mois ${state.month} ?`)) return;
+  } else if(mode==='last_month'){
+    if(!confirm(`Copier les montants assignés du mois précédent vers ${state.month} ?`)) return;
+  }
+
+  try {
+    let res = await api('quick-assign', {
+      method: 'POST',
+      body: JSON.stringify({
+        month: state.month,
+        profile_id: state.profile || 1,
+        mode: mode
+      })
+    });
+    if(res.ok){
+      await renderBudget();
+      home();
+    }
+  } catch(err){
+    alert('Erreur lors de l\'auto-assignation : '+err.message);
+  }
+};
+
+document.addEventListener('click', ()=>{
+  let m=document.getElementById('quickAssignMenu');
+  if(m) m.classList.remove('show');
+});
 
 window.targetFor=id=>{$('#targetCategoryId').value=id;openModal('targetModal')};
 
