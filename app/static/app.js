@@ -797,7 +797,45 @@ $('#newProfile').onclick=async()=>{
   await renderBudget();
 };
 
+// -------------------------------------------------------------
+// GESTION DU MODE SOMBRE / CLAIR
+// -------------------------------------------------------------
+window.initTheme = function(){
+  const saved = localStorage.getItem('budget-theme');
+  const isDark = saved === 'dark' || (!saved && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  if(isDark){
+    document.body.classList.add('dark');
+    document.documentElement.classList.add('dark');
+  } else {
+    document.body.classList.remove('dark');
+    document.documentElement.classList.remove('dark');
+  }
+  updateThemeIcon();
+};
+
+window.toggleTheme = function(){
+  const isDark = document.body.classList.toggle('dark');
+  if(isDark){
+    document.documentElement.classList.add('dark');
+    localStorage.setItem('budget-theme', 'dark');
+  } else {
+    document.documentElement.classList.remove('dark');
+    localStorage.setItem('budget-theme', 'light');
+  }
+  updateThemeIcon();
+};
+
+function updateThemeIcon(){
+  const btn = document.getElementById('themeToggle');
+  if(btn){
+    const isDark = document.body.classList.contains('dark');
+    btn.textContent = isDark ? '☀️' : '🌙';
+    btn.title = isDark ? 'Passer en mode clair' : 'Passer en mode sombre';
+  }
+}
+
 (async()=>{
+  initTheme();
   await seed();
   await home();
   await renderBudget();

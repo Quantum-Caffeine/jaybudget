@@ -1,5 +1,5 @@
-<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0b5d5c"><link rel="manifest" href="/manifest.json"><link rel="stylesheet" href="/style.css?v=2.7"><title>Budget Libre</title></head><body>
-<header><div class="brand">◒ <b>Budget Libre</b><small>v2</small></div><label class="profile-picker">Profil <select id="profileSelect"></select></label><button id="newProfile" title="Créer un profil">＋</button><div id="summary"></div><button class="menu" onclick="document.body.classList.toggle('nav-open')">☰</button></header>
+<!doctype html><html lang="fr"><head><script>(function(){var s=localStorage.getItem('budget-theme');if(s==='dark'||(!s&&window.matchMedia('(prefers-color-scheme: dark)').matches)){document.documentElement.classList.add('dark');document.addEventListener('DOMContentLoaded',function(){document.body.classList.add('dark');});}})();</script><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0b5d5c"><link rel="manifest" href="/manifest.json"><link rel="stylesheet" href="/style.css?v=2.8"><title>Budget Libre</title></head><body>
+<header><div class="brand">◒ <b>Budget Libre</b><small>v2</small></div><label class="profile-picker">Profil <select id="profileSelect"></select></label><button id="newProfile" title="Créer un profil">＋</button><div id="summary"></div><button id="themeToggle" class="btn-theme-toggle" title="Basculer Mode Sombre / Clair" onclick="toggleTheme()">🌙</button><button class="menu" onclick="document.body.classList.toggle('nav-open')">☰</button></header>
 <aside><button data-page="budget" class="active">▦ Budget</button><button data-page="transactions">↕ Transactions</button><button data-page="accounts">▣ Comptes</button><button data-page="rules">⚙ Règles & import</button><button data-page="reports">◔ Rapports</button><button data-page="settings">⌁ Sauvegarde</button><div class="sidebar-section-title">Comptes</div>
 <div id="sidebarAccounts"></div>
 <hr><button onclick="openModal('categoryModal')">＋ Catégorie</button><button onclick="openModal('txModal')">＋ Transaction</button></aside>
@@ -118,4 +118,4 @@
     <button type="button" data-close="activityModal">Fermer</button>
   </footer>
 </dialog>
-<script src="/app.js?v=2.7"></script></body></html>
+<script src="/app.js?v=2.8"></script></body></html>
