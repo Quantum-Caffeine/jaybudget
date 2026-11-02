@@ -174,7 +174,64 @@ def dashboard(month: str=month_now(), profile_id:int=1):
     WHERE cm.month<=? AND g.profile_id=?''',(month, profile_id)).fetchone()[0]
     
   ready=cash_opening + inflows_up_to_month - assigned_up_to_month
-  return {'month':month,'net_worth':money(balance),'ready':money(ready),'accounts':rows(c,"SELECT a.*, round(a.opening_balance+COALESCE((SELECT SUM(amount) FROM transactions t WHERE t.account_id=a.id),0),2) balance FROM accounts a WHERE closed=0 AND profile_id=? ORDER BY name",(profile_id,))}
+  aom=calculate_age_of_money(profile_id)
+  return {'month':month,'net_worth':money(balance),'ready':money(ready),'age_of_money':aom,'accounts':rows(c,"SELECT a.*, round(a.opening_balance+COALESCE((SELECT SUM(amount) FROM transactions t WHERE t.account_id=a.id),0),2) balance FROM accounts a WHERE closed=0 AND profile_id=? ORDER BY name",(profile_id,))}
+
+def calculate_age_of_money(profile_id: int = 1):
+ with db() as c:
+  cash_accs = rows(c, "SELECT id, opening_balance FROM accounts WHERE profile_id=? AND closed=0 AND kind IN ('checking', 'savings', 'cash')", (profile_id,))
+  if not cash_accs: return None
+  cash_acc_ids = {a['id'] for a in cash_accs}
+  id_list = ','.join(map(str, cash_acc_ids))
+  
+  first_tx = c.execute(f"SELECT MIN(tx_date) FROM transactions WHERE account_id IN ({id_list})").fetchone()
+  earliest_date = first_tx[0] if first_tx and first_tx[0] else '2025-01-01'
+  
+  fifo = []
+  for a in cash_accs:
+   if a['opening_balance'] and a['opening_balance'] > 0:
+    try:
+     d = datetime.strptime(earliest_date, '%Y-%m-%d').date()
+    except Exception:
+     d = date(2025, 1, 1)
+    fifo.append({'date': d, 'amount': float(a['opening_balance'])})
+    
+  txs = rows(c, f"SELECT tx_date, amount, transfer_account_id FROM transactions WHERE account_id IN ({id_list}) ORDER BY tx_date ASC, id ASC")
+  outflow_ages = []
+  fifo_idx = 0
+  for t in txs:
+   tgt = t['transfer_account_id']
+   if tgt and tgt in cash_acc_ids:
+    continue
+   try:
+    tx_date = datetime.strptime(t['tx_date'], '%Y-%m-%d').date()
+   except Exception:
+    continue
+   amt = float(t['amount'])
+   if amt > 0:
+    fifo.append({'date': tx_date, 'amount': amt})
+   elif amt < 0:
+    needed = abs(amt)
+    consumed = []
+    while needed > 0.001 and fifo_idx < len(fifo):
+     head = fifo[fifo_idx]
+     take = min(needed, head['amount'])
+     days = max(0, (tx_date - head['date']).days)
+     consumed.append({'days': days, 'amount': take})
+     head['amount'] -= take
+     needed -= take
+     if head['amount'] <= 0.001:
+      fifo_idx += 1
+    if needed > 0.001:
+     consumed.append({'days': 0, 'amount': needed})
+    if consumed:
+     tot = sum(x['amount'] for x in consumed)
+     if tot > 0:
+      outflow_ages.append(sum(x['days'] * x['amount'] for x in consumed) / tot)
+
+  if not outflow_ages: return None
+  last_10 = outflow_ages[-10:]
+  return round(sum(last_10) / len(last_10))
 
 def target_recommendation(target, available, today):
   if not target['target_amount']: return 0

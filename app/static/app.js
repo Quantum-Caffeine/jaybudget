@@ -59,7 +59,7 @@ window.clearAccountFilter = async function(){
 
 async function home(){
   let d=await api('dashboard?month='+state.month+'&'+qs());
-  $('#summary').innerHTML=`À répartir <b class="${d.ready<0?'bad':'good'}">${cash(d.ready)}</b> · Patrimoine <b>${cash(d.net_worth)}</b>`;
+  $('#summary').innerHTML=`À répartir <b class="${d.ready<0?'bad':'good'}">${cash(d.ready)}</b> · Patrimoine <b>${cash(d.net_worth)}</b>${d.age_of_money !== null ? ' · ⏳ Âge de l\'argent <b>' + d.age_of_money + ' j</b>' : ''}`;
 }
 
 function page(title,toolbar,content){
@@ -132,6 +132,7 @@ async function renderBudget(){
   `, `
     <div class="metrics">
       <div class="metric"><span>Prêt à répartir</span><strong class="${d.ready<0?'bad':'good'}">${cash(d.ready)}</strong></div>
+      <div class="metric" title="Temps moyen écoulé entre l'arrivée d'un dollar et sa dépense (Objectif YNAB: >30 jours)"><span>Âge de l'argent</span><strong>${d.age_of_money !== null ? d.age_of_money + ' jours' : '—'}</strong></div>
       <div class="metric"><span>Assigné ce mois</span><strong>${cash(data.reduce((a,c)=>a+c.assigned,0))}</strong></div>
       <div class="metric"><span>Disponible dans les catégories</span><strong>${cash(data.reduce((a,c)=>a+c.available,0))}</strong></div>
       <div class="metric"><span>Patrimoine</span><strong>${cash(d.net_worth)}</strong></div>

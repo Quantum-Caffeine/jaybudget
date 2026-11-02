@@ -1,4 +1,4 @@
-const CACHE='budget-libre-v8';
+const CACHE='budget-libre-v9';
 
 self.addEventListener('install', e => {
   self.skipWaiting();
