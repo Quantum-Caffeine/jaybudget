@@ -97,6 +97,10 @@ if BUDGET_PIN:
             return HTMLResponse(LOGIN_HTML)
     app.add_middleware(PinAuthMiddleware)
 
+@app.get('/health')
+def health():
+    return {'status': 'ok'}
+
 @app.get('/login')
 def login_page():
     return HTMLResponse(LOGIN_HTML)
