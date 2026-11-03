@@ -1,4 +1,4 @@
-<!doctype html><html lang="fr"><head><script>(function(){var s=localStorage.getItem('budget-theme');if(s==='dark'||(!s&&window.matchMedia('(prefers-color-scheme: dark)').matches)){document.documentElement.classList.add('dark');document.addEventListener('DOMContentLoaded',function(){document.body.classList.add('dark');});}})();</script><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0b5d5c"><link rel="manifest" href="/manifest.json"><link rel="stylesheet" href="/style.css?v=2.8"><title>Budget Libre</title></head><body>
+<!doctype html><html lang="fr"><head><script>(function(){var s=localStorage.getItem('budget-theme');if(s==='dark'||(!s&&window.matchMedia('(prefers-color-scheme: dark)').matches)){document.documentElement.classList.add('dark');document.addEventListener('DOMContentLoaded',function(){document.body.classList.add('dark');});}})();</script><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0b5d5c"><link rel="manifest" href="/manifest.json"><link rel="stylesheet" href="/style.css?v=2.9"><title>Budget Libre</title></head><body>
 <header><div class="brand">◒ <b>Budget Libre</b><small>v2</small></div><label class="profile-picker">Profil <select id="profileSelect"></select></label><button id="newProfile" title="Créer un profil">＋</button><div id="summary"></div><button id="themeToggle" class="btn-theme-toggle" title="Basculer Mode Sombre / Clair" onclick="toggleTheme()">🌙</button><button class="menu" onclick="document.body.classList.toggle('nav-open')">☰</button></header>
 <aside><button data-page="budget" class="active">▦ Budget</button><button data-page="transactions">↕ Transactions</button><button data-page="accounts">▣ Comptes</button><button data-page="rules">⚙ Règles & import</button><button data-page="reports">◔ Rapports</button><button data-page="settings">⌁ Sauvegarde</button><div class="sidebar-section-title">Comptes</div>
 <div id="sidebarAccounts"></div>
@@ -118,4 +118,38 @@
     <button type="button" data-close="activityModal">Fermer</button>
   </footer>
 </dialog>
-<script src="/app.js?v=2.8"></script></body></html>
+
+<!-- Modal Consolidation / Repartir à neuf (Fresh Start) -->
+<dialog id="freshStartModal" style="width:min(580px, calc(100% - 24px))">
+  <div class="modalhead">
+    <h2>🔄 Consolidation / Repartir à neuf</h2>
+    <button type="button" data-close="freshStartModal" aria-label="Fermer">✕</button>
+  </div>
+  <p style="margin:8px 0 16px;line-height:1.5">
+    Cette action permet de recommencer une nouvelle année ou période à neuf sans perdre votre configuration :
+  </p>
+  <div style="background:var(--paper-subtle);border:1px solid var(--line);border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:13px;line-height:1.6">
+    <div style="color:var(--green);font-weight:600;margin-bottom:4px">✓ Ce qui est conservé :</div>
+    <ul style="margin:0 0 10px 18px;padding:0">
+      <li>Tous vos <b>comptes bancaires</b> (leur solde réel actuel devient leur solde de départ)</li>
+      <li>Toutes vos <b>catégories</b> et vos <b>groupes</b></li>
+      <li>Toutes vos <b>cibles et objectifs</b> budgétaires</li>
+      <li>Vos <b>règles d'importation</b> et bénéficiaires</li>
+    </ul>
+    <div style="color:var(--red);font-weight:600;margin-bottom:4px">✗ Ce qui est réinitialisé :</div>
+    <ul style="margin:0 0 8px 18px;padding:0">
+      <li>L'historique des <b>transactions</b> (effacées pour repartir de zéro)</li>
+      <li>Les montants <b>assignés</b> aux catégories (repartent à 0,00 $)</li>
+    </ul>
+    <div style="color:var(--teal);font-weight:600">🛡️ Sauvegarde automatique :</div>
+    <p style="margin:4px 0 0">Une copie de sauvegarde de sécurité est automatiquement générée sur le serveur avant toute modification.</p>
+  </div>
+  <footer style="display:flex;justify-content:space-between;align-items:center">
+    <a href="/api/backup" download style="text-decoration:none"><button type="button" class="btn-secondary" style="font-size:12px">📥 Télécharger une copie</button></a>
+    <div style="display:flex;gap:8px">
+      <button type="button" data-close="freshStartModal">Annuler</button>
+      <button type="button" class="danger" style="background:var(--red);color:#fff;border-color:var(--red);font-weight:600" onclick="confirmFreshStart()">Confirmer et repartir à neuf</button>
+    </div>
+  </footer>
+</dialog>
+<script src="/app.js?v=2.9"></script></body></html>

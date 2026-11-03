@@ -711,6 +711,34 @@ def report(months:int=12,profile_id:int=1):
      key=t['category_name'] or 'Non catégorisé'; expenses[key]=expenses.get(key,0)-float(z['amount']);trend[m]['expenses']-=float(z['amount'])
   return {'expenses':expenses,'income':income,'trend':trend,'average_expense':money(sum(expenses.values())/max(1,months)),'net_worth':money(c.execute('SELECT COALESCE(SUM(opening_balance),0)+COALESCE((SELECT SUM(amount) FROM transactions WHERE account_id IN (SELECT id FROM accounts WHERE profile_id=?)),0) FROM accounts WHERE profile_id=?',(profile_id,profile_id)).fetchone()[0])}
 
+@app.post('/api/fresh-start')
+def fresh_start(p: dict = None):
+ p = p or {}
+ profile_id = int(p.get('profile_id', 1))
+ with db() as c:
+  src_profile = c.execute("SELECT * FROM profiles WHERE id=?", (profile_id,)).fetchone()
+  if not src_profile: raise HTTPException(404, "Profil introuvable")
+  
+  ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+  backup_path = ROOT / f"budget_backup_before_fresh_start_{ts}.db"
+  backup_ok = False
+  try:
+   shutil.copy2(DB, backup_path)
+   backup_ok = True
+  except Exception:
+   pass
+   
+  accs = rows(c, '''SELECT a.id, round(a.opening_balance + COALESCE((SELECT SUM(amount) FROM transactions t WHERE t.account_id=a.id), 0), 2) current_balance
+    FROM accounts a WHERE a.profile_id=?''', (profile_id,))
+  for a in accs:
+   c.execute("UPDATE accounts SET opening_balance=? WHERE id=?", (a['current_balance'], a['id']))
+   
+  c.execute("DELETE FROM transactions WHERE account_id IN (SELECT id FROM accounts WHERE profile_id=?)", (profile_id,))
+  c.execute('''DELETE FROM category_month WHERE category_id IN (
+    SELECT ca.id FROM categories ca JOIN groups g ON g.id=ca.group_id WHERE g.profile_id=?)''', (profile_id,))
+    
+  return {'ok': True, 'backup_created': backup_ok, 'backup_file': backup_path.name if backup_ok else None, 'accounts_updated': len(accs)}
+
 @app.get('/api/backup')
 def backup():
  target=ROOT/'backup-budget-libre.db';shutil.copy2(DB,target);return FileResponse(target,filename=f'budget-libre-{date.today()}.db')

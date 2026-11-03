@@ -125,6 +125,8 @@ async function renderBudget(){
         <button type="button" class="dropdown-item" onclick="runQuickAssign('last_month')">📋 <b>Copier le mois dernier</b><br><span class="subtext">Reprendre les assignations passées</span></button>
         <hr class="dropdown-divider">
         <button type="button" class="dropdown-item danger-item" onclick="runQuickAssign('reset')">🗑️ <b>Réinitialiser à zéro</b><br><span class="subtext">Effacer les assignations de ce mois</span></button>
+        <hr class="dropdown-divider">
+        <button type="button" class="dropdown-item" onclick="openModal('freshStartModal')" style="color:#b45309">🔄 <b>Repartir à neuf...</b><br><span class="subtext">Consolidation annuelle (Fresh Start)</span></button>
       </div>
     </div>
     <button class="primary" onclick="openModal('categoryModal')">➕ Catégorie</button>
@@ -597,6 +599,11 @@ async function renderReports(){
 
 async function renderSettings(){
   $('#settings').innerHTML=page('Données et sauvegardes','',`
+    <div class="card" style="border-left:4px solid #b45309">
+      <h2>🔄 Consolidation / Repartir à neuf (Fresh Start)</h2>
+      <p>Commence une nouvelle année ou période propre sans traîner l'historique des anciennes transactions. Vos comptes, catégories et cibles sont conservés. Vos soldes bancaires actuels deviennent vos soldes de départ.</p>
+      <button type="button" class="primary" style="background:#b45309;border-color:#b45309" onclick="openModal('freshStartModal')">Recommencer à neuf</button>
+    </div>
     <div class="card">
       <h2>Sauvegarde</h2>
       <p>Télécharge une copie SQLite complète de ton budget. Conserve-la dans un emplacement sûr et chiffré.</p>
@@ -800,6 +807,32 @@ $('#newProfile').onclick=async()=>{
 // -------------------------------------------------------------
 // GESTION DU MODE SOMBRE / CLAIR
 // -------------------------------------------------------------
+
+// -------------------------------------------------------------
+// CONSOLIDATION / REPARTIR À NEUF (FRESH START)
+// -------------------------------------------------------------
+window.confirmFreshStart = async function(){
+  let modal = document.getElementById('freshStartModal');
+  if(modal && modal.close) modal.close();
+  
+  if(!confirm('Êtes-vous certain de vouloir repartir à neuf ? Vos soldes bancaires actuels seront conservés comme soldes de départ, et les anciennes transactions seront archivées.')) return;
+  
+  try {
+    let res = await api('fresh-start', {
+      method: 'POST',
+      body: JSON.stringify({ profile_id: state.profile || 1 })
+    });
+    if(res.ok){
+      alert(`Consolidation réussie !\n\n- ${res.accounts_updated} compte(s) consolidé(s) avec leurs soldes bancaires réels.\n- Une sauvegarde de sécurité a été créée sur le serveur.\n- Vos catégories et cibles sont intactes, prêtes pour la nouvelle année.`);
+      await seed();
+      await home();
+      await renderBudget();
+      document.querySelector('aside button[data-page="budget"]')?.click();
+    }
+  } catch(err){
+    alert('Erreur lors de la consolidation : ' + err.message);
+  }
+};
 window.initTheme = function(){
   const saved = localStorage.getItem('budget-theme');
   const isDark = saved === 'dark' || (!saved && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
