@@ -476,6 +476,7 @@ async function renderAccounts(){
         </div>
         <strong class="${a.balance<0?'bad':'good'}">${cash(a.balance)}</strong>
         <button onclick="reconcile(${a.id},'${esc(a.name)}')">Rapprocher</button>
+        <button class="btn-icon danger" onclick="deleteAccount(${a.id},'${esc(a.name)}')" title="Supprimer le compte">🗑️</button>
       </div>`).join('')||'<div class="empty">Ajoutez votre premier compte.</div>'}
     </div>
     <div class="card">
@@ -488,8 +489,20 @@ async function renderAccounts(){
 window.reconcile=async(id,name)=>{
   let statement_balance=prompt('Solde du relevé pour '+name);
   if(statement_balance===null)return;
+  statement_balance=parseFloat(statement_balance.replace(',','.').replace(/\s/g,''));
+  if(isNaN(statement_balance)){alert('Montant invalide');return;}
   let d=await api('reconcile',{method:'POST',body:JSON.stringify({account_id:id,statement_balance,create_adjustment:false})});
   alert(`Solde compensé : ${cash(d.cleared_balance)}\nÉcart : ${cash(d.difference)}\nVous pouvez créer une transaction d'ajustement si nécessaire.`);
+};
+
+window.deleteAccount=async(id,name)=>{
+  if(!confirm(`Supprimer le compte « ${name} » ?\nToutes les transactions de ce compte seront aussi supprimées.`))return;
+  try{
+    await api('accounts/'+id,{method:'DELETE'});
+    await seed();
+    renderAccounts();
+    home();
+  }catch(e){alert('Erreur lors de la suppression : '+e.message);}
 };
 
 // -------------------------------------------------------------

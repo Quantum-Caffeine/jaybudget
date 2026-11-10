@@ -12,7 +12,9 @@ ROOT = Path(os.getenv("BUDGET_DATA_DIR", "data")); ROOT.mkdir(parents=True, exis
 DB = ROOT / "budget.db"
 
 def month_now(): return date.today().strftime("%Y-%m")
-def money(v): return round(float(v or 0), 2)
+def money(v):
+  if isinstance(v, str): v = v.replace(',', '.').replace(' ', '')
+  return round(float(v or 0), 2)
 @contextmanager
 def db():
     c = sqlite3.connect(DB); c.row_factory = sqlite3.Row
@@ -425,6 +427,19 @@ def accounts(profile_id:int=1):
 def add_account(p:dict):
  with db() as c:return {'id':c.execute('INSERT INTO accounts(name,kind,opening_balance,profile_id) VALUES(?,?,?,?)',(p['name'],p.get('kind','checking'),money(p.get('opening_balance')),p.get('profile_id',1))).lastrowid}
 
+
+@app.delete('/api/accounts/{account_id}')
+def delete_account(account_id:int):
+ with db() as c:
+  acct=c.execute('SELECT id FROM accounts WHERE id=?',(account_id,)).fetchone()
+  if not acct: raise HTTPException(404,'Account not found')
+  transfer_ids=c.execute('SELECT DISTINCT transfer_id FROM transactions WHERE account_id=? AND transfer_id IS NOT NULL',(account_id,)).fetchall()
+  for row in transfer_ids:
+   c.execute('DELETE FROM transactions WHERE transfer_id=?',(row[0],))
+  c.execute('DELETE FROM transactions WHERE account_id=?',(account_id,))
+  c.execute('DELETE FROM accounts WHERE id=?',(account_id,))
+ return {'ok':True}
+
 @app.get('/api/transactions')
 def transactions(account_id:Optional[int]=None, category_id:Optional[int]=None, q:str='', month:str='', profile_id:int=1):
  with db() as c:
@@ -694,7 +709,7 @@ def reconcile(p:dict):
   cleared=c.execute('SELECT COALESCE(SUM(amount),0) FROM transactions WHERE account_id=? AND cleared=1',(p['account_id'],)).fetchone()[0]+c.execute('SELECT opening_balance FROM accounts WHERE id=?',(p['account_id'],)).fetchone()[0]
   adjustment=money(p['statement_balance'])-cleared
   if adjustment and p.get('create_adjustment'): tx_create(c,{'account_id':p['account_id'],'tx_date':date.today().isoformat(),'payee':'Ajustement de rapprochement','memo':'Créé lors du rapprochement','amount':adjustment,'cleared':True,'approved':True})
-  c.execute('INSERT INTO reconciliations(account_id,reconciled_on,statement_balance,cleared_balance,adjustment) VALUES(?,?,?,?,?)',(p['account_id'],date.today().isoformat(),p['statement_balance'],cleared,adjustment))
+  c.execute('INSERT INTO reconciliations(account_id,reconciled_on,statement_balance,cleared_balance,adjustment) VALUES(?,?,?,?,?)',(p['account_id'],date.today().isoformat(),money(p['statement_balance']),cleared,adjustment))
  return {'cleared_balance':money(cleared),'difference':money(adjustment)}
 
 @app.get('/api/report')
