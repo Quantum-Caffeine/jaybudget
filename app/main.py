@@ -8,7 +8,8 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
-ROOT = Path(os.getenv("BUDGET_DATA_DIR", "data")); ROOT.mkdir(parents=True, exist_ok=True)
+DEFAULT_DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+ROOT = Path(os.getenv("BUDGET_DATA_DIR", str(DEFAULT_DATA_DIR))); ROOT.mkdir(parents=True, exist_ok=True)
 DB = ROOT / "budget.db"
 
 def month_now(): return date.today().strftime("%Y-%m")
