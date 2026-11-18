@@ -522,6 +522,27 @@ async function renderRules(){
     <p id="ynabImportResult" style="font-weight:600;margin-top:10px"></p>
   </div>
   
+  <div class="card" style="border-left:4px solid var(--teal)">
+    <h2>🎯 Récupérer les Cibles & Dates d'échéance (API YNAB)</h2>
+    <p>Les fichiers CSV de YNAB n'exportent pas les cibles ni les dates d'échéance. Synchronisez-les directement depuis votre compte YNAB en un clic.</p>
+    <form id="ynabApiForm" class="formgrid">
+      <label class="wide">
+        Jeton d'accès personnel YNAB (Personal Access Token)
+        <input type="password" id="ynabToken" name="token" required placeholder="Collez votre jeton YNAB ici...">
+        <span class="subtext">Dans YNAB : <b>Account Settings</b> ➔ <b>Developer Settings</b> ➔ <b>New Token</b>.</span>
+      </label>
+      <label class="wide" id="ynabBudgetRow" style="display:none">
+        Budget YNAB
+        <select id="ynabBudgetSelect" name="budget_id"></select>
+      </label>
+      <footer class="wide" style="display:flex;gap:10px;justify-content:flex-end;align-items:center">
+        <button type="button" id="btnCheckYnabToken">🔍 Charger mes budgets</button>
+        <button type="submit" class="primary" id="btnSyncYnab">⚡ Synchroniser les cibles et dates</button>
+      </footer>
+    </form>
+    <p id="ynabApiResult" style="font-weight:600;margin-top:10px"></p>
+  </div>
+
   <div class="card">
     <h2>Importer un relevé bancaire OFX / QFX</h2>
     <p>Les opérations déjà importées sont écartées grâce à l'identifiant bancaire (FITID), avec un contrôle de secours sur date, montant et bénéficiaire.</p>
@@ -547,6 +568,8 @@ async function renderRules(){
   </div>`);
   
   $('#ynabImportForm').onsubmit=importYnab;
+  $('#ynabApiForm').onsubmit=syncYnabApiTargets;
+  $('#btnCheckYnabToken').onclick=checkYnabBudgets;
   $('#importForm').onsubmit=importOfx;
   $('#ruleForm').onsubmit=saveRule;
 }
@@ -572,6 +595,58 @@ async function importYnab(e){
     resEl.textContent="Erreur réseau ou fichier: "+err.message;
   }
 }
+
+async function checkYnabBudgets(){
+  let token = ($('#ynabToken')?.value || '').trim();
+  let resEl = $('#ynabApiResult');
+  if(!token){
+    resEl.innerHTML = '<span class="bad">Veuillez d\'abord coller votre jeton personnel YNAB.</span>';
+    return;
+  }
+  resEl.innerHTML = 'Connexion à YNAB en cours...';
+  try {
+    let budgets = await api(`import/ynab-api/budgets?token=${encodeURIComponent(token)}`);
+    if(!budgets.length){
+      resEl.innerHTML = '<span class="bad">Aucun budget trouvé sur ce compte YNAB.</span>';
+      return;
+    }
+    let sel = $('#ynabBudgetSelect');
+    sel.innerHTML = budgets.map(b => `<option value="${b.id}">${esc(b.name)}</option>`).join('');
+    $('#ynabBudgetRow').style.display = 'grid';
+    resEl.innerHTML = `<span class="good">✓ ${budgets.length} budget(s) trouvé(s) ! Cliquez sur « Synchroniser les cibles et dates ».</span>`;
+  } catch(err){
+    resEl.innerHTML = `<span class="bad">Erreur YNAB : ${esc(err.message)}</span>`;
+  }
+}
+
+async function syncYnabApiTargets(e){
+  e.preventDefault();
+  let token = ($('#ynabToken')?.value || '').trim();
+  let budgetId = $('#ynabBudgetSelect')?.value || '';
+  let resEl = $('#ynabApiResult');
+  if(!token){
+    resEl.innerHTML = '<span class="bad">Veuillez d\'abord coller votre jeton personnel YNAB.</span>';
+    return;
+  }
+  resEl.innerHTML = 'Synchronisation des cibles et dates en cours...';
+  try {
+    let res = await api('import/ynab-api/targets', {
+      method: 'POST',
+      body: JSON.stringify({
+        token: token,
+        budget_id: budgetId,
+        profile_id: state.profile || 1
+      })
+    });
+    resEl.innerHTML = `<span class="good">✓ Succès ! ${res.targets_imported} cible(s) et date(s) d'échéance synchronisées avec vos catégories.</span>`;
+    await seed();
+    await renderBudget();
+    home();
+  } catch(err){
+    resEl.innerHTML = `<span class="bad">Erreur de synchronisation : ${esc(err.message)}</span>`;
+  }
+}
+
 
 async function importOfx(e){
   e.preventDefault();

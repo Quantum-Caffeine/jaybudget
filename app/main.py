@@ -704,6 +704,153 @@ async def import_ynab(profile_id: int, plan_file: UploadFile = File(...), regist
         'transactions_imported': tx_added
     }
 
+def ynab_api_request(endpoint: str, token: str):
+    import urllib.request, urllib.error
+    url = f"https://api.ynab.com/v1/{endpoint.lstrip('/')}"
+    req = urllib.request.Request(url, headers={
+        "Authorization": f"Bearer {token.strip()}",
+        "User-Agent": "BudgetLibre/2.0"
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+            return data.get('data', {})
+    except urllib.error.HTTPError as e:
+        body = e.read().decode('utf-8', errors='ignore')
+        msg = str(e)
+        try:
+            err_json = json.loads(body)
+            msg = err_json.get('error', {}).get('detail', str(e))
+        except Exception:
+            pass
+        if e.code == 401:
+            raise HTTPException(401, f"Jeton YNAB invalide ou expiré : {msg}")
+        raise HTTPException(e.code, f"Erreur API YNAB ({e.code}) : {msg}")
+    except Exception as e:
+        raise HTTPException(500, f"Impossible de contacter l'API YNAB : {e}")
+
+@app.get('/api/import/ynab-api/budgets')
+def get_ynab_budgets(token: str):
+    token = (token or '').strip()
+    if not token:
+        raise HTTPException(400, "Le jeton d'accès YNAB est requis.")
+    data = ynab_api_request("budgets", token)
+    budgets = data.get('budgets', [])
+    return [{'id': b['id'], 'name': b['name'], 'last_modified_on': b.get('last_modified_on')} for b in budgets]
+
+@app.post('/api/import/ynab-api/targets')
+def import_ynab_api_targets(p: dict):
+    token = (p.get('token') or '').strip()
+    if not token:
+        raise HTTPException(400, "Le jeton d'accès YNAB est requis.")
+    profile_id = int(p.get('profile_id', 1))
+    budget_id = (p.get('budget_id') or '').strip()
+
+    if not budget_id or budget_id == 'default':
+        b_data = ynab_api_request("budgets", token)
+        budgets = b_data.get('budgets', [])
+        if not budgets:
+            raise HTTPException(404, "Aucun budget trouvé sur ce compte YNAB.")
+        budget_id = budgets[0]['id']
+        budget_name = budgets[0]['name']
+    else:
+        budget_name = budget_id
+
+    cat_data = ynab_api_request(f"budgets/{budget_id}/categories", token)
+    groups = cat_data.get('category_groups', [])
+
+    targets_imported = 0
+    categories_matched = 0
+
+    with db() as c:
+        existing_groups = {g['label']: g['id'] for g in rows(c, "SELECT id, COALESCE(label, name) label FROM groups WHERE profile_id=?", (profile_id,))}
+        existing_cats = {(cat['group_id'], cat['name']): cat['id'] for cat in rows(c, "SELECT c.id, c.group_id, c.name FROM categories c JOIN groups g ON g.id=c.group_id WHERE g.profile_id=?", (profile_id,))}
+        cat_by_name = {cat['name']: cat['id'] for cat in rows(c, "SELECT c.id, c.name FROM categories c JOIN groups g ON g.id=c.group_id WHERE g.profile_id=?", (profile_id,))}
+        max_pos = c.execute("SELECT COALESCE(MAX(position), 0) FROM groups WHERE profile_id=?", (profile_id,)).fetchone()[0]
+
+        for grp in groups:
+            g_name = (grp.get('name') or '').strip()
+            if grp.get('hidden') or grp.get('deleted') or g_name in ('Internal Master Category', 'Credit Card Payments', 'Inflow'):
+                continue
+
+            for cat in grp.get('categories', []):
+                c_name = (cat.get('name') or '').strip()
+                if not c_name or cat.get('hidden') or cat.get('deleted'):
+                    continue
+
+                g_target = cat.get('goal_target')
+                g_type = cat.get('goal_type')
+                if not g_target or g_target <= 0 or not g_type:
+                    continue
+
+                amount = round(float(g_target) / 1000.0, 2)
+
+                cid = None
+                gid = existing_groups.get(g_name)
+                if gid and (gid, c_name) in existing_cats:
+                    cid = existing_cats[(gid, c_name)]
+                elif c_name in cat_by_name:
+                    cid = cat_by_name[c_name]
+                else:
+                    if not gid:
+                        max_pos += 1
+                        internal = f"{profile_id}:{g_name}:{uuid.uuid4().hex[:6]}"
+                        c.execute("INSERT INTO groups(name, label, profile_id, position) VALUES(?,?,?,?)",
+                                  (internal, g_name, profile_id, max_pos))
+                        gid = c.execute("SELECT last_insert_rowid()").fetchone()[0]
+                        existing_groups[g_name] = gid
+                    nature = 'Épargne' if any(k in g_name.lower() for k in ['épargne', 'epargne', 'reserve', 'réserve', 'savings']) else 'Dépense'
+                    c.execute("INSERT INTO categories(group_id, name, nature) VALUES(?,?,?)", (gid, c_name, nature))
+                    cid = c.execute("SELECT last_insert_rowid()").fetchone()[0]
+                    existing_cats[(gid, c_name)] = cid
+                    cat_by_name[c_name] = cid
+
+                categories_matched += 1
+
+                if g_type in ('NEED', 'MF', 'MONTHLY_FUNDING'):
+                    kind = 'refill'
+                else:
+                    kind = 'set_aside'
+
+                cadence = cat.get('goal_cadence')
+                freq_val = cat.get('goal_cadence_frequency')
+                frequency = 'monthly'
+                if cadence == 2:
+                    frequency = 'weekly' if freq_val == 1 else 'biweekly'
+                elif cadence == 13:
+                    frequency = 'yearly'
+
+                due_date = cat.get('goal_target_date')
+                if due_date and len(due_date) == 7:
+                    due_date = f"{due_date}-01"
+
+                due_day = cat.get('goal_day')
+                if not due_day and due_date:
+                    try:
+                        due_day = int(due_date.split('-')[2])
+                    except Exception:
+                        pass
+
+                c.execute('''INSERT INTO targets(category_id, kind, amount, due_date, frequency, due_day, note)
+                             VALUES(?,?,?,?,?,?,?)
+                             ON CONFLICT(category_id) DO UPDATE SET
+                               kind=excluded.kind,
+                               amount=excluded.amount,
+                               due_date=excluded.due_date,
+                               frequency=excluded.frequency,
+                               due_day=excluded.due_day,
+                               note=excluded.note''',
+                          (cid, kind, amount, due_date, frequency, due_day, f"YNAB API ({g_type})"))
+                targets_imported += 1
+
+    return {
+        'ok': True,
+        'targets_imported': targets_imported,
+        'categories_matched': categories_matched,
+        'budget_id': budget_id
+    }
+
+
 @app.post('/api/reconcile')
 def reconcile(p:dict):
  with db() as c:
